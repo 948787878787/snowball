@@ -16,17 +16,26 @@ An agent-agnostic quantitative skill for **global equities** (`US`, `EU`, `JP`, 
 
 > **Disclaimer**: Strictly for quantitative research, backtesting methodology, and systematic tracking. Not licensed financial advice.
 
-## Supported Global Markets (`global_universe.py`)
+## Supported Global Markets (`global_universe.py` & `resources/universes/*.json`)
 
-| Market Flag | Coverage | Benchmark | Round-Trip Cost Model |
-|---|---|---|---|
-| `--market US` | 40 liquid US leaders across 10 sectors | `SPY` | `0.10%` |
-| `--market EU` | 18 European leaders (Euronext / XETRA / LSE / SIX) | `^STOXX50E` | `0.30%` |
-| `--market JP` | 16 Japan leaders (TSE `.T`) | `^N225` | `0.20%` |
-| `--market HK` | 12 Hong Kong leaders (HKEX `.HK`) | `^HSI` | `0.45%` (incl. stamp duty) |
-| `--market TW` | 84 Taiwan stocks across 20 peer groups (`.TW`/`.TWO`) | `^TWII` | `0.585%` (+ FinMind monthly rev in `backtest_v5.py`) |
-| `--market GLOBAL` | Cross-region flagship leaders across US/EU/JP/HK/TW | `ACWI` | `0.30%` |
-| `--tickers ...` | Any custom comma-separated Yahoo Finance symbols | Custom (`ACWI` default) | `0.20%` |
+Built-in database covers **1,340+ listed equities across 5 regional markets × 13 standardized industries (≥ 20 companies/industry, ≥ 260 stocks/market)** and is infinitely extensible via `manage_universe.py` or custom JSON files:
+
+| Market Flag | Coverage | Stocks / Industries | Benchmark | Round-Trip Cost Model |
+|---|---|---|---|---|
+| `--market US` | NYSE / NASDAQ across 13 sectors | **260** (13 × 20) | `SPY` | `0.10%` |
+| `--market EU` | Euronext / XETRA / LSE / SIX / Nordic | **260** (13 × 20) | `^STOXX50E` | `0.30%` |
+| `--market JP` | Tokyo Stock Exchange (`.T`) | **260** (13 × 20) | `^N225` | `0.20%` |
+| `--market HK` | Hong Kong Exchange (`.HK`) | **260** (13 × 20) | `^HSI` | `0.45%` (incl. stamp duty) |
+| `--market TW` | TWSE / TPEx (`.TW` / `.TWO`) | **300** (13 × ≥20) | `^TWII` | `0.585%` (+ FinMind monthly rev in `backtest_v5.py`) |
+| `--market GLOBAL` | Auto-aggregated across all regional markets | **1,340+** (13 × ≥100) | `ACWI` | `0.30%` |
+| `--tickers ...` / `--universe-file` | Any custom Yahoo Finance symbols or JSON | Unlimited | Custom (`ACWI`) | `0.20%` |
+
+Expand the database anytime with `manage_universe.py`:
+```bash
+.venv/bin/python skills/snowball/scripts/manage_universe.py --list
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market US --industry software_internet --add APP,MDB,NET
+.venv/bin/python skills/snowball/scripts/manage_universe.py --import-csv ./extra_stocks.csv
+```
 
 ## Core v5 Ranking Formula
 

@@ -10,17 +10,30 @@ Designed to work seamlessly across **Antigravity (AGY)**, **Claude Code**, **Ope
 
 ---
 
-## Global Market Coverage
+## Global Market Coverage (1,340+ Built-In Equities, Infinitely Extensible)
 
-| Market Flag | Exchanges / Scope | Benchmark | Cost Model |
-|---|---|---|---|
-| `--market US` | 40 US blue chips across 10 sectors (NYSE / NASDAQ) | `SPY` | `0.10%` |
-| `--market EU` | 18 European leaders (Euronext / XETRA / LSE / SIX) | `^STOXX50E` | `0.30%` |
-| `--market JP` | 16 Japan leaders (Tokyo Stock Exchange `.T`) | `^N225` | `0.20%` |
-| `--market HK` | 12 Hong Kong leaders (HKEX `.HK`) | `^HSI` | `0.45%` |
-| `--market TW` | 84 Taiwan stocks across 20 peer groups (TWSE / TPEx) | `^TWII` | `0.585%` |
-| `--market GLOBAL` | Cross-region flagship universe (US + EU + JP + HK + TW) | `ACWI` | `0.30%` |
-| `--tickers ...` | Any custom Yahoo Finance tickers worldwide | Custom (`ACWI`) | `0.20%` |
+Every regional market ships as an editable JSON database (`skills/snowball/resources/universes/*.json`) covering **13 standardized industries × ≥ 20 listed companies per industry (≥ 260 stocks per market)** — and users can freely append more tickers, bulk-import CSVs, or add brand-new markets (`KR`, `AU`, `CA`, `IN`, etc.) via `manage_universe.py`:
+
+| Market Flag | Exchanges / Scope | Stocks / Industries | Benchmark | Cost Model |
+|---|---|---|---|---|
+| `--market US` | NYSE / NASDAQ blue chips & leaders | **260** (13 × 20) | `SPY` | `0.10%` |
+| `--market EU` | Euronext / XETRA / LSE / SIX / Nordic | **260** (13 × 20) | `^STOXX50E` | `0.30%` |
+| `--market JP` | Tokyo Stock Exchange (`.T`) | **260** (13 × 20) | `^N225` | `0.20%` |
+| `--market HK` | Hong Kong Exchange (`.HK`) | **260** (13 × 20) | `^HSI` | `0.45%` |
+| `--market TW` | TWSE / TPEx (`.TW` / `.TWO`) | **300** (13 × ≥20) | `^TWII` | `0.585%` |
+| `--market GLOBAL` | Auto-aggregated across all regional markets | **1,340+** (13 × ≥100) | `ACWI` | `0.30%` |
+| `--tickers ...` / `--universe-file` | Any custom Yahoo Finance tickers or custom JSON | Unlimited | Custom (`ACWI`) | `0.20%` |
+
+```bash
+# Inspect all markets & 13 industries
+.venv/bin/python skills/snowball/scripts/manage_universe.py --list
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market US --show-industries
+
+# Add more tickers anytime (or create a brand-new market like KR)
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market US --industry software_internet --add APP,MDB,NET
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market KR --name "South Korea (KRX)" --benchmark ^KS11 --currency KRW --industry semiconductors_hardware --add 005930.KS,000660.KS
+.venv/bin/python skills/snowball/scripts/manage_universe.py --import-csv ./extra_stocks.csv
+```
 
 ---
 

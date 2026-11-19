@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 """Universal Global Equity v5 Multi-Factor Ranker & Point-in-Time Backtester.
 
-Works across ANY Yahoo Finance equity market (US, EU, JP, HK, TW, GLOBAL) or custom tickers
-without relying on country-specific APIs:
+Works across ANY Yahoo Finance equity market (US, EU, JP, HK, TW, GLOBAL — 1,340+ built-in stocks
+across 13 industries with >= 20 stocks/industry and >= 250 stocks/market), custom JSON universe
+files, or arbitrary comma-separated tickers:
 1. Residual Momentum (F_ResMom_26_4w, Blitz et al. 2011): 26w skipping 4w Beta-adjusted alpha.
 2. Full-Group Industry Momentum (F_IndMom_Full_12w, Moskowitz & Grinblatt 1999).
-3. Fundamental Growth (F_Fund): Revenue / earnings growth snapshot (live ranking) or neutral in
+3. Fundamental Growth (F_Fund): Revenue growth snapshot (live ranking) or neutral in
    pure-price historical mode.
 4. 8%-Capped Industry-Neutral Value (F_NormVal): Within-sector 1/PBR (financials) or capped 1/PER
    (non-financials, E/P <= 15%) + 0.5 * capped dividend yield (Yield <= 8.0%).
 
 Usage:
-    python global_ranker.py --market US
-    python global_ranker.py --market GLOBAL --backtest
+    python global_ranker.py --market US --top 20
+    python global_ranker.py --market US --industry semiconductors_hardware
+    python global_ranker.py --market GLOBAL --backtest --skip-fundamentals
+    python global_ranker.py --universe-file ./my_extra_universe.json
     python global_ranker.py --tickers AAPL,MSFT,GOOGL,ASML.AS,7203.T,2330.TW --benchmark ACWI
     python global_ranker.py --market US --offline-demo
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -38,59 +42,105 @@ from global_universe import (
     get_market_groups,
     get_market_tickers,
     group_map_for,
+    list_markets,
+    load_universe_file,
 )
 
 BETA_WINDOW = 52
 BETA_MIN = 26
 
 
-def download_global_prices(tickers: list, benchmark: str, period: str = "5y") -> tuple:
-    """Download dividend-adjusted daily close prices for tickers + benchmark from Yahoo Finance."""
-    all_syms = list(dict.fromkeys([*tickers, benchmark]))
-    if not all_syms:
+def download_global_prices(
+    tickers: list,
+    benchmark: str,
+    period: str = "5y",
+    batch_size: int = 80,
+) -> tuple:
+    """Download dividend-adjusted daily close prices in batches from Yahoo Finance."""
+    unique_tickers = list(dict.fromkeys(tickers))
+    if not unique_tickers:
         raise ValueError("No tickers provided.")
-    raw = yf.download(all_syms, period=period, progress=False, auto_adjust=True, threads=True)
-    if raw is None or raw.empty or "Close" not in raw:
-        raise RuntimeError(f"Unable to fetch Yahoo Finance prices for {len(all_syms)} symbols.")
-    closes = raw["Close"]
-    if isinstance(closes, pd.Series):
-        closes = closes.to_frame(name=all_syms[0])
-    if benchmark not in closes.columns or closes[benchmark].dropna().empty:
+
+    frames: List[pd.DataFrame] = []
+    # Download benchmark cleanly first
+    bench_raw = yf.download([benchmark], period=period, progress=False, auto_adjust=True, threads=False)
+    if bench_raw is None or bench_raw.empty or "Close" not in bench_raw:
         raise RuntimeError(f"Benchmark '{benchmark}' returned no price history.")
-    stock_cols = [t for t in tickers if t in closes.columns and closes[t].dropna().shape[0] >= 30]
+    bench_close = bench_raw["Close"]
+    if isinstance(bench_close, pd.DataFrame):
+        bench_close = bench_close.iloc[:, 0]
+    bench_series = bench_close.dropna().rename(benchmark)
+    if bench_series.empty:
+        raise RuntimeError(f"Benchmark '{benchmark}' returned no price history.")
+
+    for start in range(0, len(unique_tickers), batch_size):
+        chunk = unique_tickers[start:start + batch_size]
+        raw = yf.download(chunk, period=period, progress=False, auto_adjust=True, threads=True)
+        if raw is None or raw.empty or "Close" not in raw:
+            continue
+        closes = raw["Close"]
+        if isinstance(closes, pd.Series):
+            closes = closes.to_frame(name=chunk[0])
+        frames.append(closes)
+
+    if not frames:
+        raise RuntimeError(f"Unable to fetch Yahoo Finance prices for {len(unique_tickers)} symbols.")
+
+    all_closes = pd.concat(frames, axis=1)
+    all_closes = all_closes.loc[:, ~all_closes.columns.duplicated()]
+    stock_cols = [t for t in unique_tickers if t in all_closes.columns and all_closes[t].dropna().shape[0] >= 30]
     if not stock_cols:
         raise RuntimeError("No stock symbols returned sufficient price history.")
-    return closes[stock_cols], closes[benchmark]
+    return all_closes[stock_cols], bench_series
 
 
-def fetch_global_fundamentals(tickers: list) -> pd.DataFrame:
-    """Fetch point-in-time snapshot fundamentals (Yield, PER, PBR, Revenue Growth) from Yahoo Finance."""
-    rows = []
-    for sym in tickers:
-        try:
-            info = yf.Ticker(sym).info or {}
-        except Exception:
-            info = {}
-        dy = info.get("dividendYield")
-        # Yahoo dividendYield is typically decimal (0.025 -> 2.5%) or occasionally percentage
-        if dy is not None:
-            dy_pct = float(dy) * 100.0 if float(dy) < 0.5 else float(dy)
-        else:
-            dy_pct = 0.0
-        per = info.get("trailingPE") or info.get("forwardPE")
-        pbr = info.get("priceToBook")
-        rev_g = info.get("revenueGrowth")
-        rows.append({
-            "ticker": sym,
-            "name": info.get("shortName") or sym,
-            "sector": info.get("sector") or "",
-            "currency": info.get("currency") or "",
-            "dividend_yield": max(0.0, dy_pct),
-            "PER": float(per) if per is not None and float(per) > 0 else np.nan,
-            "PBR": float(pbr) if pbr is not None and float(pbr) > 0 else np.nan,
-            "rev_growth": float(rev_g) if rev_g is not None else np.nan,
-        })
+def _fetch_one_fundamental(sym: str) -> dict:
+    try:
+        info = yf.Ticker(sym).info or {}
+    except Exception:
+        info = {}
+    dy = info.get("dividendYield")
+    if dy is not None:
+        dy_pct = float(dy) * 100.0 if float(dy) < 0.5 else float(dy)
+    else:
+        dy_pct = 0.0
+    per = info.get("trailingPE") or info.get("forwardPE")
+    pbr = info.get("priceToBook")
+    rev_g = info.get("revenueGrowth")
+    return {
+        "ticker": sym,
+        "name": info.get("shortName") or sym,
+        "sector": info.get("sector") or "",
+        "currency": info.get("currency") or "",
+        "dividend_yield": max(0.0, dy_pct),
+        "PER": float(per) if per is not None and float(per) > 0 else np.nan,
+        "PBR": float(pbr) if pbr is not None and float(pbr) > 0 else np.nan,
+        "rev_growth": float(rev_g) if rev_g is not None else np.nan,
+    }
+
+
+def fetch_global_fundamentals(tickers: list, max_workers: int = 8) -> pd.DataFrame:
+    """Fetch point-in-time snapshot fundamentals concurrently from Yahoo Finance."""
+    if not tickers:
+        return pd.DataFrame(columns=["name", "sector", "currency", "dividend_yield", "PER", "PBR", "rev_growth"])
+    workers = max(1, min(max_workers, len(tickers)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        rows = list(pool.map(_fetch_one_fundamental, tickers))
     return pd.DataFrame(rows).set_index("ticker")
+
+
+def make_neutral_fundamentals(tickers: list) -> pd.DataFrame:
+    """Neutral placeholder fundamentals when running in fast price-only mode."""
+    return pd.DataFrame({
+        "ticker": tickers,
+        "name": tickers,
+        "sector": "",
+        "currency": "",
+        "dividend_yield": 0.0,
+        "PER": np.nan,
+        "PBR": np.nan,
+        "rev_growth": np.nan,
+    }).set_index("ticker")
 
 
 def compute_global_price_factors(close_d: pd.DataFrame, bench_d: pd.Series, groups: dict) -> dict:
@@ -155,20 +205,23 @@ def score_latest_global(
     val_df = core_val.to_frame().T
     val_ind = _group_zscore(val_df, groups).iloc[0]
     if val_ind.isna().all():
-        val_ind = ((core_val - core_val.mean()) / (core_val.std() or 1.0)).clip(-3.0, 3.0)
+        sd = core_val.std()
+        val_ind = ((core_val - core_val.mean()) / sd).clip(-3.0, 3.0) if (sd and sd > 0) else pd.Series(0.0, index=tickers)
     val_ind = val_ind.fillna(0.0)
 
     yld_sd = yld_cap.std()
-    val_yld = ((yld_cap - yld_cap.mean()) / yld_sd).clip(-3.0, 3.0) if yld_sd > 0 else pd.Series(0.0, index=tickers)
+    val_yld = ((yld_cap - yld_cap.mean()) / yld_sd).clip(-3.0, 3.0) if (yld_sd and yld_sd > 0) else pd.Series(0.0, index=tickers)
     raw_val = val_ind + 0.5 * val_yld
-    f_norm_val = ((raw_val - raw_val.mean()) / (raw_val.std() or 1.0)).clip(-3.0, 3.0)
+    rv_sd = raw_val.std()
+    f_norm_val = ((raw_val - raw_val.mean()) / rv_sd).clip(-3.0, 3.0) if (rv_sd and rv_sd > 0) else pd.Series(0.0, index=tickers)
 
     rev_g = fund["rev_growth"].clip(-0.5, 1.5)
     rev_sd = rev_g.std()
     f_fin = ((rev_g - rev_g.mean()) / rev_sd).clip(-3.0, 3.0).fillna(0.0) if (rev_sd and rev_sd > 0) else pd.Series(0.0, index=tickers)
 
     raw_score = 0.5 * f_res + 0.5 * f_ind + 1.0 * f_fin + 1.5 * f_norm_val
-    v5_score = ((raw_score - raw_score.mean()) / (raw_score.std() or 1.0)).clip(-3.0, 3.0)
+    rs_sd = raw_score.std()
+    v5_score = ((raw_score - raw_score.mean()) / rs_sd).clip(-3.0, 3.0) if (rs_sd and rs_sd > 0) else pd.Series(0.0, index=tickers)
 
     out = pd.DataFrame({
         "ticker": tickers,
@@ -190,7 +243,7 @@ def score_latest_global(
 def backtest_global_staggered(
     price_factors: dict,
     round_trip_cost: float = 0.0020,
-    buy_frac: float = 0.25,
+    buy_frac: float = 0.20,
 ) -> dict:
     """4-cohort staggered historical backtest for global pure-price v5 signal (ResMom + IndMom)."""
     sig = ft.cs_zscore(
@@ -257,70 +310,95 @@ def backtest_global_staggered(
 
 
 def make_offline_demo_data(groups: dict) -> tuple:
-    """Deterministic synthetic multi-market dataset for offline testing and demos."""
+    """Fast vectorized deterministic synthetic multi-market dataset for offline testing and demos."""
     rng = np.random.default_rng(42)
     dates = pd.bdate_range("2022-01-03", periods=780)
-    mkt_ret = rng.normal(0.0004, 0.010, len(dates))
+    n_dates = len(dates)
+    mkt_ret = rng.normal(0.0004, 0.010, n_dates)
     bench = pd.Series(100.0 * np.cumprod(1.0 + mkt_ret), index=dates, name="BENCH")
 
-    tickers = [t for mem in groups.values() for t in mem]
-    px_map = {}
-    fund_rows = []
-    for idx, t in enumerate(tickers):
-        drift = 0.0002 + (idx % 5) * 0.00015
-        r = 0.9 * mkt_ret + rng.normal(drift, 0.014, len(dates))
-        px_map[t] = 50.0 * (1 + (idx % 4)) * np.cumprod(1.0 + r)
-        fund_rows.append({
-            "ticker": t,
-            "name": t,
-            "sector": "",
-            "currency": "USD",
-            "dividend_yield": round(1.0 + (idx % 7) * 1.1, 2),
-            "PER": round(8.0 + (idx % 6) * 4.5, 2),
-            "PBR": round(0.8 + (idx % 5) * 0.9, 2),
-            "rev_growth": round(-0.05 + (idx % 6) * 0.08, 3),
-        })
-    return pd.DataFrame(px_map, index=dates), bench, pd.DataFrame(fund_rows).set_index("ticker")
+    tickers = list(dict.fromkeys(t for mem in groups.values() for t in mem))
+    n_t = len(tickers)
+    idx_arr = np.arange(n_t)
+    drifts = 0.0002 + (idx_arr % 5) * 0.00015
+    noise = rng.normal(0.0, 0.014, size=(n_dates, n_t))
+    rets = 0.9 * mkt_ret[:, None] + drifts[None, :] + noise
+    starts = 50.0 * (1 + (idx_arr % 4))
+    prices = starts[None, :] * np.cumprod(1.0 + rets, axis=0)
+    close_df = pd.DataFrame(prices, index=dates, columns=tickers)
+
+    fund_df = pd.DataFrame({
+        "ticker": tickers,
+        "name": tickers,
+        "sector": "",
+        "currency": "USD",
+        "dividend_yield": np.round(1.0 + (idx_arr % 7) * 1.1, 2),
+        "PER": np.round(8.0 + (idx_arr % 6) * 4.5, 2),
+        "PBR": np.round(0.8 + (idx_arr % 5) * 0.9, 2),
+        "rev_growth": np.round(-0.05 + (idx_arr % 6) * 0.08, 3),
+    }).set_index("ticker")
+    return close_df, bench, fund_df
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Snowball Global Equity v5 Multi-Factor Ranker & Backtester")
-    parser.add_argument("--market", default="GLOBAL", choices=list(MARKET_CONFIG.keys()), help="Market preset")
+    parser.add_argument("--market", default="GLOBAL", help=f"Market preset ({', '.join(list_markets())})")
+    parser.add_argument("--industry", default="", help="Optional single industry filter (e.g. semiconductors_hardware)")
+    parser.add_argument("--universe-file", type=Path, default=None, help="Optional custom JSON universe file to merge or rank")
     parser.add_argument("--tickers", default="", help="Optional comma-separated custom tickers (e.g. AAPL,MSFT,7203.T,2330.TW)")
     parser.add_argument("--benchmark", default="", help="Override benchmark ticker (e.g. SPY, ACWI, ^N225, ^STOXX50E)")
     parser.add_argument("--period", default="5y", help="Yahoo Finance history window (default: 5y)")
-    parser.add_argument("--top", type=int, default=15, help="Number of top-ranked stocks to display")
+    parser.add_argument("--top", type=int, default=20, help="Number of top-ranked stocks to display")
+    parser.add_argument("--skip-fundamentals", action="store_true", help="Skip per-ticker Yahoo fundamental fetch (faster for 250+ tickers)")
     parser.add_argument("--backtest", action="store_true", help="Also run 4-cohort staggered historical backtest")
     parser.add_argument("--offline-demo", action="store_true", help="Run on synthetic data without network")
     args = parser.parse_args()
 
-    cfg = MARKET_CONFIG[args.market]
     if args.tickers.strip():
         custom_list = [t.strip() for t in args.tickers.split(",") if t.strip()]
         groups = {"custom": tuple(custom_list)}
         tickers = custom_list
         benchmark = args.benchmark or "ACWI"
         cost = 0.0020
-    else:
-        groups = get_market_groups(args.market)
-        tickers = list(get_market_tickers(args.market))
+        mkt_label = "CUSTOM"
+        mkt_name = "Custom Watchlist"
+    elif args.universe_file is not None and not args.market:
+        cfg, groups = load_universe_file(args.universe_file)
+        tickers = list(dict.fromkeys(t for mems in groups.values() for t in mems))
         benchmark = args.benchmark or cfg["benchmark"]
         cost = cfg["round_trip_cost"]
+        mkt_label = args.universe_file.stem.upper()
+        mkt_name = cfg["name"]
+    else:
+        mkt_key = args.market.upper()
+        if mkt_key not in MARKET_CONFIG:
+            raise ValueError(f"Unsupported market '{args.market}'. Choose from: {', '.join(list_markets())}")
+        cfg = MARKET_CONFIG[mkt_key]
+        groups = get_market_groups(mkt_key, industry=args.industry or None, extra_file=args.universe_file)
+        tickers = list(dict.fromkeys(t for mems in groups.values() for t in mems))
+        benchmark = args.benchmark or cfg["benchmark"]
+        cost = cfg["round_trip_cost"]
+        mkt_label = f"{mkt_key}/{args.industry}" if args.industry else mkt_key
+        mkt_name = cfg["name"]
 
     if args.offline_demo:
         close_d, bench_d, fund_df = make_offline_demo_data(groups)
-        mode_tag = "OFFLINE DEMO"
+        mode_tag = f"OFFLINE DEMO ({len(tickers)} stocks)"
     else:
         close_d, bench_d = download_global_prices(tickers, benchmark, period=args.period)
-        fund_df = fetch_global_fundamentals(list(close_d.columns))
-        mode_tag = f"LIVE ({cfg['name']})"
+        fund_df = (
+            make_neutral_fundamentals(list(close_d.columns))
+            if args.skip_fundamentals
+            else fetch_global_fundamentals(list(close_d.columns))
+        )
+        mode_tag = f"LIVE ({mkt_name}, {len(close_d.columns)}/{len(tickers)} stocks)"
 
     pf = compute_global_price_factors(close_d, bench_d, groups)
     ranked = score_latest_global(pf, fund_df, groups)
 
     pd.set_option("display.width", 220)
     pd.set_option("display.max_columns", 15)
-    print(f"=== Snowball Global v5 Ranking | {args.market} | {mode_tag} | Benchmark: {benchmark} ===")
+    print(f"=== Snowball Global v5 Ranking | {mkt_label} | {mode_tag} | Benchmark: {benchmark} ===")
     print(ranked.head(args.top).round(3).to_string(index=False))
 
     if args.backtest:

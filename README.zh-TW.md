@@ -10,17 +10,30 @@
 
 ---
 
-## 支援的全球股市範圍
+## 支援的全球股市範圍（內建 1,340+ 檔，支援無限擴充）
 
-| 市場參數 | 涵蓋交易所與標的池 | 基準指數 | 交易成本模型 |
-|---|---|---|---|
-| `--market US` | 美股 10 大產業 40 檔核心藍籌（NYSE / NASDAQ） | `SPY` | `0.10%` |
-| `--market EU` | 歐洲 18 檔龍頭（Euronext / XETRA / LSE / SIX） | `^STOXX50E` | `0.30%` |
-| `--market JP` | 日本 16 檔東證權值藍籌（`.T`） | `^N225` | `0.20%` |
-| `--market HK` | 香港 12 檔恒生核心權值（`.HK`） | `^HSI` | `0.45%`（含印花稅） |
-| `--market TW` | 台股 20 大同業組 84 檔（上市／上櫃） | `^TWII` | `0.585%` |
-| `--market GLOBAL` | 跨區全球旗艦組合（美／歐／日／港／台） | `ACWI` | `0.30%` |
-| `--tickers ...` | 任意自訂全球 Yahoo Finance 股票代碼 | 自訂（預設 `ACWI`） | `0.20%` |
+每個主要市場皆以獨立 JSON 資料庫存放（`skills/snowball/resources/universes/*.json`），涵蓋 **13 大標準產業 × 每產業至少 20 家上市公司（單一市場皆達 260～300 檔以上）**，並支援隨時透過 `manage_universe.py` 新增個股、批次匯入 CSV 或建立全新國家市場（如韓股 `KR`、澳股 `AU`、加股 `CA`）：
+
+| 市場參數 | 涵蓋交易所與範圍 | 內建股數 / 產業數 | 基準指數 | 交易成本模型 |
+|---|---|---|---|---|
+| `--market US` | 美國 NYSE / NASDAQ 各產業代表企業 | **260 檔**（13 × 20） | `SPY` | `0.10%` |
+| `--market EU` | 歐洲 Euronext / XETRA / LSE / SIX / 北歐 | **260 檔**（13 × 20） | `^STOXX50E` | `0.30%` |
+| `--market JP` | 日本東京證券交易所（`.T`） | **260 檔**（13 × 20） | `^N225` | `0.20%` |
+| `--market HK` | 香港聯交所（`.HK`） | **260 檔**（13 × 20） | `^HSI` | `0.45%`（含印花稅） |
+| `--market TW` | 台灣上市／上櫃（`.TW` / `.TWO`） | **300 檔**（13 × ≥20） | `^TWII` | `0.585%` |
+| `--market GLOBAL` | 自動聚合全部區域市場（跨區同業比較） | **1,340+ 檔**（13 × ≥100） | `ACWI` | `0.30%` |
+| `--tickers ...` / `--universe-file` | 任意自訂全球 Yahoo Finance 代碼或外部 JSON | 無上限 | 自訂（預設 `ACWI`） | `0.20%` |
+
+```bash
+# 查看所有市場股數與 13 大產業明細
+.venv/bin/python skills/snowball/scripts/manage_universe.py --list
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market US --show-industries
+
+# 隨時自行擴充現有市場或建立全新市場（例：新增美股或建立韓股 KR）
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market US --industry software_internet --add APP,MDB,NET
+.venv/bin/python skills/snowball/scripts/manage_universe.py --market KR --name "South Korea (KRX)" --benchmark ^KS11 --currency KRW --industry semiconductors_hardware --add 005930.KS,000660.KS
+.venv/bin/python skills/snowball/scripts/manage_universe.py --import-csv ./extra_stocks.csv
+```
 
 ---
 
