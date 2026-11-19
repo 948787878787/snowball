@@ -8,8 +8,14 @@ files, or arbitrary comma-separated tickers:
 2. Full-Group Industry Momentum (F_IndMom_Full_12w, Moskowitz & Grinblatt 1999).
 3. Fundamental Growth (F_Fund): Revenue growth snapshot (live ranking) or neutral in
    pure-price historical mode.
-4. 8%-Capped Industry-Neutral Value (F_NormVal): Within-sector 1/PBR (financials) or capped 1/PER
-   (non-financials, E/P <= 15%) + 0.5 * capped dividend yield (Yield <= 8.0%).
+4. 8%-Capped Industry-Neutral Value (F_NormVal): Within-sector 1/PBR (financials) or capped
+   trailing 1/PER (non-financials, E/P <= 15%, strictly excluding loss-making forwardPE fallbacks)
+   + 0.5 * capped dividend yield (Yield <= 8.0%, computed from trailing annual dividend rate/yield).
+
+Audit & Anti-Look-Ahead Guarantees:
+- Next-trading-day Open execution (Monday open fill after Friday close signal, eliminating same-bar bias).
+- Automatic USD FX conversion in multi-currency / GLOBAL runs so Beta vs ACWI is currency-consistent.
+- Optional point-in-time historical membership mask (`--membership-csv`) for survivorship-free tests.
 
 Usage:
     python global_ranker.py --market US --top 20
@@ -24,7 +30,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -49,6 +55,105 @@ from global_universe import (
 BETA_WINDOW = 52
 BETA_MIN = 26
 
+SUFFIX_CURRENCY = {
+    ".T": "JPY",
+    ".TW": "TWD",
+    ".TWO": "TWD",
+    ".HK": "HKD",
+    ".L": "GBP",
+    ".SW": "CHF",
+    ".CO": "DKK",
+    ".ST": "SEK",
+    ".OL": "NOK",
+    ".KS": "KRW",
+    ".KQ": "KRW",
+    ".PA": "EUR",
+    ".DE": "EUR",
+    ".AS": "EUR",
+    ".MI": "EUR",
+    ".MC": "EUR",
+    ".BR": "EUR",
+    ".HE": "EUR",
+    ".IR": "EUR",
+    ".LS": "EUR",
+    ".VI": "EUR",
+}
+
+# Yahoo FX tickers: (yahoo_symbol, is_usd_per_local)
+# e.g. EURUSD=X quotes USD per 1 EUR (multiply local price by FX); JPY=X quotes JPY per 1 USD (divide by FX).
+FX_TO_USD_TICKERS = {
+    "EUR": ("EURUSD=X", True),
+    "GBP": ("GBPUSD=X", True),
+    "JPY": ("JPY=X", False),
+    "TWD": ("TWD=X", False),
+    "HKD": ("HKD=X", False),
+    "CHF": ("CHF=X", False),
+    "DKK": ("DKK=X", False),
+    "SEK": ("SEK=X", False),
+    "NOK": ("NOK=X", False),
+    "KRW": ("KRW=X", False),
+}
+
+
+def infer_ticker_currency(ticker: str) -> str:
+    """Infer trading currency from Yahoo Finance exchange suffix (defaults to USD)."""
+    sym = ticker.upper().strip()
+    for suffix, curr in SUFFIX_CURRENCY.items():
+        if sym.endswith(suffix):
+            return curr
+    return "USD"
+
+
+def convert_prices_to_usd(
+    close_d: pd.DataFrame,
+    open_d: Optional[pd.DataFrame] = None,
+    fx_series_map: Optional[Dict[str, Tuple[pd.Series, bool]]] = None,
+    period: str = "5y",
+) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+    """Convert non-USD daily stock prices into USD using historical FX series.
+
+    Eliminates FX drift/volatility contamination when regressing multi-currency global equities
+    against a USD benchmark (e.g., ACWI).
+    """
+    needed_ccys = sorted({
+        infer_ticker_currency(c) for c in close_d.columns if infer_ticker_currency(c) != "USD"
+    })
+    if not needed_ccys:
+        return close_d, open_d
+
+    fx_map: Dict[str, Tuple[pd.Series, bool]] = dict(fx_series_map or {})
+    missing_ccys = [c for c in needed_ccys if c not in fx_map and c in FX_TO_USD_TICKERS]
+    if missing_ccys:
+        fx_syms = [FX_TO_USD_TICKERS[c][0] for c in missing_ccys]
+        raw = yf.download(fx_syms, period=period, progress=False, auto_adjust=True, threads=True)
+        if raw is not None and not raw.empty and "Close" in raw:
+            fx_close = raw["Close"]
+            if isinstance(fx_close, pd.Series):
+                fx_close = fx_close.to_frame(name=fx_syms[0])
+            for c in missing_ccys:
+                sym, is_usd_per_local = FX_TO_USD_TICKERS[c]
+                if sym in fx_close.columns and not fx_close[sym].dropna().empty:
+                    fx_map[c] = (fx_close[sym].dropna(), is_usd_per_local)
+
+    close_usd = close_d.copy()
+    open_usd = open_d.copy() if open_d is not None else None
+    for col in close_d.columns:
+        ccy = infer_ticker_currency(col)
+        if ccy == "USD" or ccy not in fx_map:
+            continue
+        fx_s, is_usd_per_local = fx_map[ccy]
+        aligned = fx_s.reindex(close_usd.index).ffill().bfill()
+        if is_usd_per_local:
+            close_usd[col] = close_usd[col] * aligned
+            if open_usd is not None and col in open_usd.columns:
+                open_usd[col] = open_usd[col] * aligned.reindex(open_usd.index).ffill().bfill()
+        else:
+            safe_fx = aligned.replace(0.0, np.nan)
+            close_usd[col] = close_usd[col] / safe_fx
+            if open_usd is not None and col in open_usd.columns:
+                open_usd[col] = open_usd[col] / safe_fx.reindex(open_usd.index).ffill().bfill()
+    return close_usd, open_usd
+
 
 def download_global_prices(
     tickers: list,
@@ -56,13 +161,14 @@ def download_global_prices(
     period: str = "5y",
     batch_size: int = 80,
 ) -> tuple:
-    """Download dividend-adjusted daily close prices in batches from Yahoo Finance."""
+    """Download dividend-adjusted daily Close and Open prices in batches from Yahoo Finance.
+
+    Returns (close_d, open_d, bench_d).
+    """
     unique_tickers = list(dict.fromkeys(tickers))
     if not unique_tickers:
         raise ValueError("No tickers provided.")
 
-    frames: List[pd.DataFrame] = []
-    # Download benchmark cleanly first
     bench_raw = yf.download([benchmark], period=period, progress=False, auto_adjust=True, threads=False)
     if bench_raw is None or bench_raw.empty or "Close" not in bench_raw:
         raise RuntimeError(f"Benchmark '{benchmark}' returned no price history.")
@@ -73,6 +179,8 @@ def download_global_prices(
     if bench_series.empty:
         raise RuntimeError(f"Benchmark '{benchmark}' returned no price history.")
 
+    close_frames: List[pd.DataFrame] = []
+    open_frames: List[pd.DataFrame] = []
     for start in range(0, len(unique_tickers), batch_size):
         chunk = unique_tickers[start:start + batch_size]
         raw = yf.download(chunk, period=period, progress=False, auto_adjust=True, threads=True)
@@ -81,17 +189,90 @@ def download_global_prices(
         closes = raw["Close"]
         if isinstance(closes, pd.Series):
             closes = closes.to_frame(name=chunk[0])
-        frames.append(closes)
+        close_frames.append(closes)
+        if "Open" in raw:
+            opens = raw["Open"]
+            if isinstance(opens, pd.Series):
+                opens = opens.to_frame(name=chunk[0])
+            open_frames.append(opens)
 
-    if not frames:
+    if not close_frames:
         raise RuntimeError(f"Unable to fetch Yahoo Finance prices for {len(unique_tickers)} symbols.")
 
-    all_closes = pd.concat(frames, axis=1)
+    all_closes = pd.concat(close_frames, axis=1)
     all_closes = all_closes.loc[:, ~all_closes.columns.duplicated()]
     stock_cols = [t for t in unique_tickers if t in all_closes.columns and all_closes[t].dropna().shape[0] >= 30]
     if not stock_cols:
         raise RuntimeError("No stock symbols returned sufficient price history.")
-    return all_closes[stock_cols], bench_series
+
+    if open_frames:
+        all_opens = pd.concat(open_frames, axis=1)
+        all_opens = all_opens.loc[:, ~all_opens.columns.duplicated()]
+        open_df = all_opens.reindex(index=all_closes.index, columns=stock_cols)
+    else:
+        open_df = all_closes[stock_cols].copy()
+
+    return all_closes[stock_cols], open_df, bench_series
+
+
+def parse_yahoo_dividend_yield_pct(info: dict) -> float:
+    """Parse trailing annual dividend yield in percentage points (e.g., 0.42 -> 0.42%) safely.
+
+    Fixes Yahoo Finance's 2025 schema change where `dividendYield` is already in percent
+    (e.g., AAPL = 0.42 meaning 0.42%), whereas `trailingAnnualDividendYield` is a decimal
+    ratio (0.0042). Never multiplies `dividendYield < 0.5` by 100.
+    """
+    # 1. Most reliable & scale-invariant: trailingAnnualDividendRate / price
+    rate = info.get("trailingAnnualDividendRate")
+    px = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
+    if rate is not None and px is not None:
+        try:
+            r_val, p_val = float(rate), float(px)
+            if r_val >= 0.0 and p_val > 0.0:
+                return max(0.0, (r_val / p_val) * 100.0)
+        except (TypeError, ValueError):
+            pass
+
+    # 2. Secondary: trailingAnnualDividendYield (strictly decimal ratio in Yahoo Finance)
+    ty = info.get("trailingAnnualDividendYield")
+    if ty is not None:
+        try:
+            ty_val = float(ty)
+            if 0.0 <= ty_val < 0.50:
+                return ty_val * 100.0
+        except (TypeError, ValueError):
+            pass
+
+    # 3. Last fallback: dividendYield (percentage points in yfinance >= 0.2.54)
+    dy = info.get("dividendYield")
+    if dy is not None:
+        try:
+            dy_val = float(dy)
+            if dy_val >= 0.0:
+                return dy_val
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def parse_yahoo_trailing_pe(info: dict) -> float:
+    """Return strictly positive trailing P/E; never fall back to forwardPE for loss-making firms."""
+    eps = info.get("trailingEps")
+    if eps is not None:
+        try:
+            if float(eps) <= 0.0:
+                return np.nan
+        except (TypeError, ValueError):
+            pass
+    per = info.get("trailingPE")
+    if per is not None:
+        try:
+            per_val = float(per)
+            if per_val > 0.0:
+                return per_val
+        except (TypeError, ValueError):
+            pass
+    return np.nan
 
 
 def _fetch_one_fundamental(sym: str) -> dict:
@@ -99,21 +280,17 @@ def _fetch_one_fundamental(sym: str) -> dict:
         info = yf.Ticker(sym).info or {}
     except Exception:
         info = {}
-    dy = info.get("dividendYield")
-    if dy is not None:
-        dy_pct = float(dy) * 100.0 if float(dy) < 0.5 else float(dy)
-    else:
-        dy_pct = 0.0
-    per = info.get("trailingPE") or info.get("forwardPE")
+    dy_pct = parse_yahoo_dividend_yield_pct(info)
+    per = parse_yahoo_trailing_pe(info)
     pbr = info.get("priceToBook")
     rev_g = info.get("revenueGrowth")
     return {
         "ticker": sym,
         "name": info.get("shortName") or sym,
         "sector": info.get("sector") or "",
-        "currency": info.get("currency") or "",
+        "currency": info.get("currency") or infer_ticker_currency(sym),
         "dividend_yield": max(0.0, dy_pct),
-        "PER": float(per) if per is not None and float(per) > 0 else np.nan,
+        "PER": per,
         "PBR": float(pbr) if pbr is not None and float(pbr) > 0 else np.nan,
         "rev_growth": float(rev_g) if rev_g is not None else np.nan,
     }
@@ -135,7 +312,7 @@ def make_neutral_fundamentals(tickers: list) -> pd.DataFrame:
         "ticker": tickers,
         "name": tickers,
         "sector": "",
-        "currency": "",
+        "currency": [infer_ticker_currency(t) for t in tickers],
         "dividend_yield": 0.0,
         "PER": np.nan,
         "PBR": np.nan,
@@ -143,10 +320,35 @@ def make_neutral_fundamentals(tickers: list) -> pd.DataFrame:
     }).set_index("ticker")
 
 
-def compute_global_price_factors(close_d: pd.DataFrame, bench_d: pd.Series, groups: dict) -> dict:
-    """Compute weekly point-in-time Residual Momentum and Full-Group Industry Momentum."""
+def compute_next_open_weekly(open_d: pd.DataFrame, weeks: pd.DatetimeIndex) -> pd.DataFrame:
+    """For each weekly Friday signal timestamp `dt`, return the first trading day's Open strictly after `dt`."""
+    open_sorted = open_d.sort_index()
+    idx = open_sorted.index
+    rows = []
+    for dt in weeks:
+        pos = int(idx.searchsorted(dt, side="right"))
+        if pos < len(open_sorted):
+            rows.append(open_sorted.iloc[pos])
+        else:
+            rows.append(pd.Series(np.nan, index=open_sorted.columns))
+    return pd.DataFrame(rows, index=weeks, columns=open_sorted.columns)
+
+
+def compute_global_price_factors(
+    close_d: pd.DataFrame,
+    bench_d: pd.Series,
+    groups: dict,
+    open_d: Optional[pd.DataFrame] = None,
+) -> dict:
+    """Compute weekly point-in-time Residual Momentum, Full-Group Industry Momentum,
+    and next-trading-day Open execution prices."""
     close_w = close_d.resample("W-FRI").last().ffill()
     bench_w = bench_d.resample("W-FRI").last().ffill().reindex(close_w.index)
+    next_open_w = (
+        compute_next_open_weekly(open_d, close_w.index)
+        if open_d is not None
+        else close_w.shift(-1)
+    )
 
     ret_1w = close_w.pct_change(fill_method=None)
     mkt_1w = bench_w.pct_change(fill_method=None)
@@ -169,6 +371,7 @@ def compute_global_price_factors(close_d: pd.DataFrame, bench_d: pd.Series, grou
 
     return {
         "close_w": close_w,
+        "next_open_w": next_open_w,
         "ret_1w": ret_1w,
         "mkt_1w": mkt_1w,
         "alpha": alpha,
@@ -193,8 +396,8 @@ def score_latest_global(
     f_ind = price_factors["f_ind_mom"].loc[dt].reindex(tickers).fillna(0.0)
 
     fund = fundamentals.reindex(tickers)
-    ey = (1.0 / fund["PER"]).clip(upper=EY_CAP)
-    bp = 1.0 / fund["PBR"]
+    ey = (1.0 / fund["PER"].where(fund["PER"] > 0)).clip(upper=EY_CAP).fillna(0.0)
+    bp = 1.0 / fund["PBR"].where(fund["PBR"] > 0)
     yld_cap = fund["dividend_yield"].fillna(0.0).clip(upper=YIELD_CAP_PCT)
 
     core_val = pd.Series(
@@ -244,11 +447,26 @@ def backtest_global_staggered(
     price_factors: dict,
     round_trip_cost: float = 0.0020,
     buy_frac: float = 0.20,
+    membership_mask: Optional[pd.DataFrame] = None,
 ) -> dict:
-    """4-cohort staggered historical backtest for global pure-price v5 signal (ResMom + IndMom)."""
+    """4-cohort staggered historical backtest with realistic Next-Trading-Day Open execution.
+
+    When a cohort rebalances on Friday close `dt`:
+    - Newly bought stocks enter at `next_open_w.loc[dt]` (Monday open), earning `Close[nxt] / Open[Mon] - 1`.
+    - Retained stocks stay invested through the weekend, earning `Close[nxt] / Close[dt] - 1`.
+    - Exited stocks close at `next_open_w.loc[dt]`, realizing the weekend gap `Open[Mon] / Close[dt] - 1`
+      on the exiting slice before cash rotates into new buys (approximated transparently via
+      weighted entry/retention returns minus half-spread/cost).
+    """
     sig = ft.cs_zscore(
         price_factors["f_res_mom"].fillna(0.0) + price_factors["f_ind_mom"].fillna(0.0)
     ).where(price_factors["f_res_mom"].notna())
+    if membership_mask is not None:
+        aligned_mask = membership_mask.reindex(index=sig.index, columns=sig.columns).fillna(False).astype(bool)
+        sig = sig.where(aligned_mask)
+
+    close_w = price_factors["close_w"]
+    next_open_w = price_factors.get("next_open_w")
     ret_1w = price_factors["ret_1w"]
     ew_1w = ret_1w.mean(axis=1)
     tgt_4w = price_factors["target_4w"]
@@ -274,17 +492,49 @@ def backtest_global_staggered(
         for i in range(len(valid_dates) - 1):
             dt, nxt = valid_dates[i], valid_dates[i + 1]
             cost = 0.0
+            new_entries = set()
+            exited = set()
             if i % 4 == offset or not held:
                 a = sig.loc[dt].dropna().sort_values(ascending=False)
                 k = max(2, int(np.floor(len(a) * buy_frac)))
                 new_set = set(a.index[:k])
                 if held:
-                    turn = len(new_set - held) / max(len(new_set), 1)
+                    new_entries = new_set - held
+                    exited = held - new_set
+                    turn = len(new_entries) / max(len(new_set), 1)
                     cost = turn * round_trip_cost
+                else:
+                    new_entries = set(new_set)
                 held = new_set
+
             if held:
-                r = ret_1w.loc[nxt, list(held)].dropna()
-                wk[nxt] = (float(r.mean()) if len(r) else 0.0) - cost
+                per_stock_rets = []
+                retained = held - new_entries
+                # Retained holdings earn Friday-close -> next-Friday-close
+                if retained:
+                    r_ret = ret_1w.loc[nxt, list(retained)].dropna()
+                    per_stock_rets.extend(r_ret.tolist())
+
+                # Newly entered holdings execute at Monday Open -> next-Friday-close
+                if new_entries:
+                    if next_open_w is not None and dt in next_open_w.index:
+                        ent_open = next_open_w.loc[dt, list(new_entries)]
+                        ent_close = close_w.loc[nxt, list(new_entries)]
+                        r_ent = (ent_close / ent_open.replace(0.0, np.nan) - 1.0).dropna()
+                        # Account for weekend gap on exited slice sold at Monday Open before rotation
+                        if exited:
+                            ex_open = next_open_w.loc[dt, list(exited)]
+                            ex_prev = close_w.loc[dt, list(exited)]
+                            gap_exit = (ex_open / ex_prev.replace(0.0, np.nan) - 1.0).dropna()
+                            gap_mean = float(gap_exit.mean()) if len(gap_exit) else 0.0
+                            r_ent = (1.0 + gap_mean) * (1.0 + r_ent) - 1.0
+                        per_stock_rets.extend(r_ent.tolist())
+                    else:
+                        r_ent = ret_1w.loc[nxt, list(new_entries)].dropna()
+                        per_stock_rets.extend(r_ent.tolist())
+
+                gross_r = float(np.mean(per_stock_rets)) if per_stock_rets else 0.0
+                wk[nxt] = gross_r - cost
         cohort_rets.append(pd.Series(wk))
 
     port_w = pd.concat(cohort_rets, axis=1).mean(axis=1).dropna()
@@ -306,11 +556,15 @@ def backtest_global_staggered(
         "True_MDD": mdd,
         "Sharpe": sharpe,
         "Weeks": n_w,
+        "Execution": "Next-Day Open",
     }
 
 
 def make_offline_demo_data(groups: dict) -> tuple:
-    """Fast vectorized deterministic synthetic multi-market dataset for offline testing and demos."""
+    """Fast vectorized deterministic synthetic multi-market dataset for offline testing and demos.
+
+    Returns (close_d, open_d, bench_d, fund_df).
+    """
     rng = np.random.default_rng(42)
     dates = pd.bdate_range("2022-01-03", periods=780)
     n_dates = len(dates)
@@ -326,74 +580,125 @@ def make_offline_demo_data(groups: dict) -> tuple:
     starts = 50.0 * (1 + (idx_arr % 4))
     prices = starts[None, :] * np.cumprod(1.0 + rets, axis=0)
     close_df = pd.DataFrame(prices, index=dates, columns=tickers)
+    # Realistic open prices with overnight gap around prior close
+    overnight = rng.normal(0.0, 0.003, size=(n_dates, n_t))
+    prev_close = np.vstack([starts[None, :], prices[:-1, :]])
+    open_df = pd.DataFrame(prev_close * (1.0 + overnight), index=dates, columns=tickers)
 
     fund_df = pd.DataFrame({
         "ticker": tickers,
         "name": tickers,
         "sector": "",
-        "currency": "USD",
+        "currency": [infer_ticker_currency(t) for t in tickers],
         "dividend_yield": np.round(1.0 + (idx_arr % 7) * 1.1, 2),
         "PER": np.round(8.0 + (idx_arr % 6) * 4.5, 2),
         "PBR": np.round(0.8 + (idx_arr % 5) * 0.9, 2),
         "rev_growth": np.round(-0.05 + (idx_arr % 6) * 0.08, 3),
     }).set_index("ticker")
-    return close_df, bench, fund_df
+    return close_df, open_df, bench, fund_df
+
+
+def resolve_universe_selection(
+    market: str = "",
+    industry: str = "",
+    universe_file: Optional[Path] = None,
+    tickers_csv: str = "",
+    benchmark_override: str = "",
+) -> Tuple[dict, list, str, float, str, str, bool]:
+    """Resolve CLI flags into (groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_to_usd).
+
+    Fixes the unreachable standalone `--universe-file` bug:
+    - `--tickers ...` -> custom watchlist only.
+    - `--universe-file` WITHOUT `--market` -> rank ONLY the custom universe file.
+    - `--market X` (with optional `--universe-file` merge) -> rank market X.
+    - None specified -> defaults cleanly to GLOBAL.
+    """
+    if tickers_csv.strip():
+        custom_list = [t.strip() for t in tickers_csv.split(",") if t.strip()]
+        groups = {"custom": tuple(custom_list)}
+        tickers = custom_list
+        benchmark = benchmark_override or "ACWI"
+        cost = 0.0020
+        mkt_label = "CUSTOM"
+        mkt_name = "Custom Watchlist"
+        ccys = {infer_ticker_currency(t) for t in tickers}
+        convert_usd = len(ccys) > 1 or (benchmark.upper() in {"ACWI", "SPY", "VT"} and ccys != {"USD"})
+        return groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_usd
+
+    if universe_file is not None and not market.strip():
+        cfg, groups = load_universe_file(universe_file)
+        if industry.strip():
+            if industry.strip() not in groups:
+                raise ValueError(f"Industry '{industry}' not found in {universe_file}.")
+            groups = {industry.strip(): groups[industry.strip()]}
+        tickers = list(dict.fromkeys(t for mems in groups.values() for t in mems))
+        benchmark = benchmark_override or cfg["benchmark"]
+        cost = cfg["round_trip_cost"]
+        mkt_label = universe_file.stem.upper()
+        mkt_name = cfg["name"]
+        ccys = {infer_ticker_currency(t) for t in tickers}
+        convert_usd = cfg.get("currency", "USD").upper() == "USD" and ccys != {"USD"}
+        return groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_usd
+
+    mkt_key = (market.strip() or "GLOBAL").upper()
+    if mkt_key not in MARKET_CONFIG:
+        raise ValueError(f"Unsupported market '{mkt_key}'. Choose from: {', '.join(list_markets())}")
+    cfg = MARKET_CONFIG[mkt_key]
+    groups = get_market_groups(mkt_key, industry=industry or None, extra_file=universe_file)
+    tickers = list(dict.fromkeys(t for mems in groups.values() for t in mems))
+    benchmark = benchmark_override or cfg["benchmark"]
+    cost = cfg["round_trip_cost"]
+    mkt_label = f"{mkt_key}/{industry}" if industry else mkt_key
+    mkt_name = cfg["name"]
+    convert_usd = (mkt_key == "GLOBAL") or (cfg.get("currency", "USD").upper() == "USD" and any(infer_ticker_currency(t) != "USD" for t in tickers))
+    return groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_usd
+
+
+def load_membership_csv(path: Path) -> pd.DataFrame:
+    """Load optional point-in-time boolean constituent mask CSV (date index, ticker columns)."""
+    df = pd.read_csv(path, index_col=0, parse_dates=True)
+    return df.astype(bool)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Snowball Global Equity v5 Multi-Factor Ranker & Backtester")
-    parser.add_argument("--market", default="GLOBAL", help=f"Market preset ({', '.join(list_markets())})")
+    parser.add_argument("--market", default="", help=f"Market preset ({', '.join(list_markets())}; defaults to GLOBAL if omitted without --universe-file)")
     parser.add_argument("--industry", default="", help="Optional single industry filter (e.g. semiconductors_hardware)")
-    parser.add_argument("--universe-file", type=Path, default=None, help="Optional custom JSON universe file to merge or rank")
+    parser.add_argument("--universe-file", type=Path, default=None, help="Standalone custom JSON universe file (or merged into --market if both provided)")
+    parser.add_argument("--membership-csv", type=Path, default=None, help="Optional point-in-time historical constituent mask CSV to eliminate survivorship bias")
     parser.add_argument("--tickers", default="", help="Optional comma-separated custom tickers (e.g. AAPL,MSFT,7203.T,2330.TW)")
     parser.add_argument("--benchmark", default="", help="Override benchmark ticker (e.g. SPY, ACWI, ^N225, ^STOXX50E)")
     parser.add_argument("--period", default="5y", help="Yahoo Finance history window (default: 5y)")
     parser.add_argument("--top", type=int, default=20, help="Number of top-ranked stocks to display")
     parser.add_argument("--skip-fundamentals", action="store_true", help="Skip per-ticker Yahoo fundamental fetch (faster for 250+ tickers)")
-    parser.add_argument("--backtest", action="store_true", help="Also run 4-cohort staggered historical backtest")
+    parser.add_argument("--backtest", action="store_true", help="Also run 4-cohort staggered historical backtest (Next-Day Open execution)")
     parser.add_argument("--offline-demo", action="store_true", help="Run on synthetic data without network")
     args = parser.parse_args()
 
-    if args.tickers.strip():
-        custom_list = [t.strip() for t in args.tickers.split(",") if t.strip()]
-        groups = {"custom": tuple(custom_list)}
-        tickers = custom_list
-        benchmark = args.benchmark or "ACWI"
-        cost = 0.0020
-        mkt_label = "CUSTOM"
-        mkt_name = "Custom Watchlist"
-    elif args.universe_file is not None and not args.market:
-        cfg, groups = load_universe_file(args.universe_file)
-        tickers = list(dict.fromkeys(t for mems in groups.values() for t in mems))
-        benchmark = args.benchmark or cfg["benchmark"]
-        cost = cfg["round_trip_cost"]
-        mkt_label = args.universe_file.stem.upper()
-        mkt_name = cfg["name"]
-    else:
-        mkt_key = args.market.upper()
-        if mkt_key not in MARKET_CONFIG:
-            raise ValueError(f"Unsupported market '{args.market}'. Choose from: {', '.join(list_markets())}")
-        cfg = MARKET_CONFIG[mkt_key]
-        groups = get_market_groups(mkt_key, industry=args.industry or None, extra_file=args.universe_file)
-        tickers = list(dict.fromkeys(t for mems in groups.values() for t in mems))
-        benchmark = args.benchmark or cfg["benchmark"]
-        cost = cfg["round_trip_cost"]
-        mkt_label = f"{mkt_key}/{args.industry}" if args.industry else mkt_key
-        mkt_name = cfg["name"]
+    groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_usd = resolve_universe_selection(
+        market=args.market,
+        industry=args.industry,
+        universe_file=args.universe_file,
+        tickers_csv=args.tickers,
+        benchmark_override=args.benchmark,
+    )
 
     if args.offline_demo:
-        close_d, bench_d, fund_df = make_offline_demo_data(groups)
+        close_d, open_d, bench_d, fund_df = make_offline_demo_data(groups)
         mode_tag = f"OFFLINE DEMO ({len(tickers)} stocks)"
     else:
-        close_d, bench_d = download_global_prices(tickers, benchmark, period=args.period)
+        close_d, open_d, bench_d = download_global_prices(tickers, benchmark, period=args.period)
+        if convert_usd:
+            close_d, open_d = convert_prices_to_usd(close_d, open_d, period=args.period)
         fund_df = (
             make_neutral_fundamentals(list(close_d.columns))
             if args.skip_fundamentals
             else fetch_global_fundamentals(list(close_d.columns))
         )
-        mode_tag = f"LIVE ({mkt_name}, {len(close_d.columns)}/{len(tickers)} stocks)"
+        fx_note = ", USD-normalized" if convert_usd else ""
+        mode_tag = f"LIVE ({mkt_name}, {len(close_d.columns)}/{len(tickers)} stocks{fx_note})"
 
-    pf = compute_global_price_factors(close_d, bench_d, groups)
+    pf = compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
     ranked = score_latest_global(pf, fund_df, groups)
 
     pd.set_option("display.width", 220)
@@ -402,8 +707,14 @@ def main() -> None:
     print(ranked.head(args.top).round(3).to_string(index=False))
 
     if args.backtest:
-        bt_res = backtest_global_staggered(pf, round_trip_cost=cost)
-        print("\n=== 4-Cohort Staggered Pure-Price v5 Backtest (ResMom + IndMom) ===")
+        mem_mask = load_membership_csv(args.membership_csv) if args.membership_csv else None
+        if mem_mask is None:
+            print(
+                "\n[NOTICE] Survivorship Bias Disclosure: Static current-day universe omits delisted stocks; "
+                "historical CAGR/Sharpe are upward-biased. Pass --membership-csv for point-in-time constituents."
+            )
+        bt_res = backtest_global_staggered(pf, round_trip_cost=cost, membership_mask=mem_mask)
+        print("\n=== 4-Cohort Staggered Pure-Price v5 Backtest (ResMom + IndMom | Next-Day Open Fill) ===")
         for k, v in bt_res.items():
             if isinstance(v, float):
                 print(f"  {k:<12}: {v:.4f}")

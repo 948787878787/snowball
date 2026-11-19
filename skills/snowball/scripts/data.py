@@ -1,7 +1,13 @@
 """Data loading with on-disk cache.
 
 Sources:
-- Yahoo Finance (yfinance): daily adjusted OHLCV for TW stocks, ^TWII, US lead and macro tickers.
+- Yahoo Finance (yfinance): daily OHLCV for TW stocks, ^TWII, US lead and macro tickers.
+  Downloads with `auto_adjust=False` so we retain:
+  - `close`: dividend/split-adjusted close (`Adj Close`) for total-return calculations.
+  - `raw_close`: unadjusted nominal close (`Close`) for point-in-time affordability filters
+    (avoiding look-ahead from future dividends).
+  - `open`: dividend/split-adjusted open (`Open * AdjClose / Close`) for realistic next-day
+    open execution (eliminating same-bar Friday-close fill bias).
 - FinMind open API: monthly revenue, PER/PBR/dividend yield, institutional buy/sell.
 
 Point-in-time rules applied here:
@@ -43,10 +49,10 @@ def _cached(name: str, loader):
     return df
 
 
-def _download_yahoo(tickers: list) -> pd.DataFrame:
+def _download_yahoo(tickers: list, auto_adjust: bool = True) -> pd.DataFrame:
     if not tickers:
         return pd.DataFrame()
-    raw = yf.download(tickers, start=START_DATE, progress=False, auto_adjust=True, threads=True)
+    raw = yf.download(tickers, start=START_DATE, progress=False, auto_adjust=auto_adjust, threads=True)
     if raw is None or raw.empty:
         return pd.DataFrame()
     return raw
@@ -54,7 +60,7 @@ def _download_yahoo(tickers: list) -> pd.DataFrame:
 
 def _resolve_tw_symbols(stock_ids: tuple) -> dict:
     """Map stock id -> Yahoo symbol (.TW for TWSE, .TWO for TPEx)."""
-    first = _download_yahoo([f"{s}.TW" for s in stock_ids])
+    first = _download_yahoo([f"{s}.TW" for s in stock_ids], auto_adjust=True)
     if first.empty or "Close" not in first:
         raise RuntimeError("Failed to download Yahoo Finance prices. Check network connectivity.")
     closes = first["Close"]
@@ -67,7 +73,7 @@ def _resolve_tw_symbols(stock_ids: tuple) -> dict:
         else:
             missing.append(sid)
     if missing:
-        second_raw = _download_yahoo([f"{s}.TWO" for s in missing])
+        second_raw = _download_yahoo([f"{s}.TWO" for s in missing], auto_adjust=True)
         second = second_raw["Close"] if (not second_raw.empty and "Close" in second_raw) else pd.DataFrame()
         for sid in missing:
             col = f"{sid}.TWO"
@@ -81,23 +87,29 @@ def _resolve_tw_symbols(stock_ids: tuple) -> dict:
 
 
 def load_prices() -> dict:
-    """Return dict with 'close', 'volume' (stock id columns), 'index', 'us', 'macro' frames."""
+    """Return dict with 'close' (adjusted), 'raw_close' (nominal), 'open' (adjusted),
+    'volume', 'index', 'us', and 'macro' frames."""
     def loader():
         ids = all_stock_ids()
         mapping = _resolve_tw_symbols(ids)
-        raw = _download_yahoo(list(mapping.values()))
+        raw = _download_yahoo(list(mapping.values()), auto_adjust=False)
         inverse = {v: k for k, v in mapping.items()}
-        close = raw["Close"].rename(columns=inverse)
+        raw_close = raw["Close"].rename(columns=inverse)
+        adj_close = raw["Adj Close"].rename(columns=inverse) if "Adj Close" in raw else raw_close.copy()
+        adj_ratio = adj_close / raw_close.replace(0.0, pd.NA)
+        adj_open = (raw["Open"].rename(columns=inverse) * adj_ratio) if "Open" in raw else adj_close.copy()
         volume = raw["Volume"].rename(columns=inverse)
-        ext = _download_yahoo([MARKET_INDEX, *US_LEAD_TICKERS, *MACRO_TICKERS])["Close"]
+        ext = _download_yahoo([MARKET_INDEX, *US_LEAD_TICKERS, *MACRO_TICKERS], auto_adjust=True)["Close"]
         return pd.DataFrame({"payload": [{
-            "close": close,
+            "close": adj_close,
+            "raw_close": raw_close,
+            "open": adj_open,
             "volume": volume,
             "index": ext[MARKET_INDEX],
             "us": ext[list(US_LEAD_TICKERS)],
             "macro": ext[list(MACRO_TICKERS)],
         }]})
-    return _cached("prices", loader)["payload"].iloc[0]
+    return _cached("prices_v2", loader)["payload"].iloc[0]
 
 
 def _finmind(dataset: str, stock_id: str) -> pd.DataFrame:
@@ -142,5 +154,4 @@ def load_valuation() -> pd.DataFrame:
 
 def load_institutional() -> pd.DataFrame:
     df = _load_finmind_all("TaiwanStockInstitutionalInvestorsBuySell").copy()
-    df = df.assign(date=pd.to_datetime(df["date"]), net=df["buy"] - df["sell"])
-    return df[["date", "stock_id", "name", "net"]]
+    return df.assign(date=pd.to_datetime(df["date"]), net=df["buy"] - df["sell"])

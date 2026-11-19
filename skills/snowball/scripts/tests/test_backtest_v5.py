@@ -54,6 +54,46 @@ def test_zero_realized_loss_simulator_respects_invariants():
     assert res["Contributed_TWD"] == 10000.0 * 5
     assert res["Terminal_TWD"] > 0
     assert res["Winner_Trims"] >= 1
+    assert "True_TWR_MDD_%" in res
+
+
+def test_twr_nav_has_no_deposit_dilution_and_combined_mdd_is_true_joint():
+    # Bug #7a: Monotonically rising portfolio with monthly deposits must have 0% TWR MDD
+    idx = pd.date_range("2024-01-05", periods=8, freq="W-FRI")
+    val_s = pd.Series([100.0, 110.0, 121.0, 233.1, 256.41, 282.051, 410.2561, 451.28171], index=idx)
+    cf_s = pd.Series([100.0, 0.0, 0.0, 100.0, 0.0, 0.0, 100.0, 0.0], index=idx)
+    nav = b5.compute_twr_nav(val_s, cf_s)
+    mdd = float((nav / nav.cummax() - 1.0).min())
+    assert abs(mdd) < 1e-9
+
+    # Bug #7b: Combined MDD of two anti-correlated legs must be strictly smaller than weighted average MDD
+    core_val = pd.Series([100.0, 120.0, 90.0, 110.0], index=idx[:4])
+    sat_val = pd.Series([100.0, 80.0, 110.0, 90.0], index=idx[:4])
+    cf_zero = pd.Series([100.0, 0.0, 0.0, 0.0], index=idx[:4])
+    core_mdd = float((b5.compute_twr_nav(core_val, cf_zero) / b5.compute_twr_nav(core_val, cf_zero).cummax() - 1.0).min())
+    sat_mdd = float((b5.compute_twr_nav(sat_val, cf_zero) / b5.compute_twr_nav(sat_val, cf_zero).cummax() - 1.0).min())
+    comb = b5.combine_cashflow_simulations(
+        {"_weekly_val": core_val, "_weekly_cf": cf_zero, "Contributed_TWD": 100.0, "Terminal_TWD": 110.0, "End_Yield_%": 5.0, "Max_Stock_Wt_%": 10.0, "Holdings_Count": 5, "Winner_Trims": 0},
+        {"_weekly_val": sat_val, "_weekly_cf": cf_zero, "Contributed_TWD": 100.0, "Terminal_TWD": 90.0, "End_Yield_%": 3.0, "Max_Stock_Wt_%": 20.0, "Holdings_Count": 5, "Winner_Trims": 1},
+    )
+    # Combined value is constant 200 every week -> true combined MDD is 0%, NOT ~ -22.5% weighted average!
+    assert abs(comb["True_TWR_MDD_%"]) < 1e-9
+    assert abs(core_mdd) > 0.20 and abs(sat_mdd) > 0.15
+
+
+def test_raw_close_affordability_prevents_future_dividend_lookahead():
+    # Bug #8: Stock A has adj close 700 <= 800 but nominal raw_close 950 > 800 -> must NOT be bought
+    idx = pd.date_range("2024-01-05", periods=8, freq="W-FRI")
+    adj_px = pd.DataFrame({"A": np.full(8, 700.0), "B": np.full(8, 100.0)}, index=idx)
+    raw_px = pd.DataFrame({"A": np.full(8, 950.0), "B": np.full(8, 100.0)}, index=idx)
+    sig = pd.DataFrame({"A": np.full(8, 3.0), "B": np.full(8, 1.0)}, index=idx)
+    yld = pd.DataFrame({"A": np.full(8, 2.0), "B": np.full(8, 6.0)}, index=idx)
+    res = b5.simulate_personal_cashflow(
+        sig, adj_px, yld, "2024-01-05", "2024-02-23",
+        monthly_inflow=10000.0, max_price=800.0, raw_close_w=raw_px,
+    )
+    # If B (yield 6%) was bought instead of A (yield 2%), End_Yield_% == 6.0
+    assert res["End_Yield_%"] == 6.0
 
 
 def test_dashboard_template_and_injection():
