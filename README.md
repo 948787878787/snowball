@@ -1,6 +1,6 @@
 # Snowball 
 
-An open-source **Antigravity Agent Skill** & Python quantitative research workbench for **Taiwan equity multi-factor ranking (v5)** and **buy-only retail cash-flow rebalancing** — built to compound high-cash-flow equity snowballs systematically.
+An open-source **Ａll Agent Skill** & Python quantitative research workbench for **equity multi-factor ranking (v5)** and **buy-only retail cash-flow rebalancing** — built to compound high-cash-flow equity snowballs systematically.
 
 > **Disclaimer**: This repository is provided strictly for quantitative research, backtesting methodology, and educational purposes. It does not constitute financial or investment advice.
 
@@ -18,7 +18,7 @@ An open-source **Antigravity Agent Skill** & Python quantitative research workbe
 
 ## Installation
 
-### 1. Install as an Antigravity Skill
+### 1. Install Skill
 Copy `skills/tw-quant-factor-v5` into either your project's `.agents/skills/` directory or your global `~/.gemini/config/skills/` directory:
 
 ```bash
