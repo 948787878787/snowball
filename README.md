@@ -10,18 +10,18 @@ Designed to work seamlessly across **Antigravity (AGY)**, **Claude Code**, **Ope
 
 ---
 
-## Global Market Coverage (1,340+ Built-In Equities, Infinitely Extensible)
+## Global Market Coverage (2,780+ Built-In Equities, Infinitely Extensible)
 
-Every regional market ships as an editable JSON database (`skills/snowball/resources/universes/*.json`) covering **13 standardized industries × ≥ 20 listed companies per industry (≥ 260 stocks per market)** — and users can freely append more tickers, bulk-import CSVs, or add brand-new markets (`KR`, `AU`, `CA`, `IN`, etc.) via `manage_universe.py`:
+Every regional market ships as an editable JSON database (`skills/snowball/resources/universes/*.json`) covering **13 standardized industries × ≥ 20 listed companies per industry** — including **1,000 US** and **1,000 Taiwan** official listed companies — and users can freely append more tickers, bulk-import CSVs, or add brand-new markets (`KR`, `AU`, `CA`, `IN`, etc.) via `manage_universe.py`:
 
 | Market Flag | Exchanges / Scope | Stocks / Industries | Benchmark | Cost Model |
 |---|---|---|---|---|
-| `--market US` | NYSE / NASDAQ blue chips & leaders | **260** (13 × 20) | `SPY` | `0.10%` |
+| `--market US` | NYSE / NASDAQ top 1,000 operating companies | **1,000** (13 × ≥30) | `SPY` | `0.10%` |
+| `--market TW` | TWSE / TPEx top 1,000 listed companies (`.TW` / `.TWO`) | **1,000** (13 × ≥20) | `^TWII` | `0.585%` |
 | `--market EU` | Euronext / XETRA / LSE / SIX / Nordic | **260** (13 × 20) | `^STOXX50E` | `0.30%` |
 | `--market JP` | Tokyo Stock Exchange (`.T`) | **260** (13 × 20) | `^N225` | `0.20%` |
 | `--market HK` | Hong Kong Exchange (`.HK`) | **260** (13 × 20) | `^HSI` | `0.45%` |
-| `--market TW` | TWSE / TPEx (`.TW` / `.TWO`) | **300** (13 × ≥20) | `^TWII` | `0.585%` |
-| `--market GLOBAL` | Auto-aggregated across all regional markets | **1,340+** (13 × ≥100) | `ACWI` | `0.30%` |
+| `--market GLOBAL` | Auto-aggregated across all regional markets | **2,780+** (13 × ≥115) | `ACWI` | `0.30%` |
 | `--tickers ...` / `--universe-file` | Any custom Yahoo Finance tickers or custom JSON | Unlimited | Custom (`ACWI`) | `0.20%` |
 
 ```bash

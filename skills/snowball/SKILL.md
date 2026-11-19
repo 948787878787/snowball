@@ -18,16 +18,16 @@ An agent-agnostic quantitative skill for **global equities** (`US`, `EU`, `JP`, 
 
 ## Supported Global Markets (`global_universe.py` & `resources/universes/*.json`)
 
-Built-in database covers **1,340+ listed equities across 5 regional markets × 13 standardized industries (≥ 20 companies/industry, ≥ 260 stocks/market)** and is infinitely extensible via `manage_universe.py` or custom JSON files:
+Built-in database covers **2,780+ listed equities across 5 regional markets × 13 standardized industries (≥ 20 companies/industry; 1,000 US + 1,000 TW)** and is infinitely extensible via `manage_universe.py` or custom JSON files:
 
 | Market Flag | Coverage | Stocks / Industries | Benchmark | Round-Trip Cost Model |
 |---|---|---|---|---|
-| `--market US` | NYSE / NASDAQ across 13 sectors | **260** (13 × 20) | `SPY` | `0.10%` |
+| `--market US` | NYSE / NASDAQ top 1,000 companies across 13 sectors | **1,000** (13 × ≥30) | `SPY` | `0.10%` |
+| `--market TW` | TWSE / TPEx top 1,000 companies (`.TW` / `.TWO`) | **1,000** (13 × ≥20) | `^TWII` | `0.585%` (+ FinMind monthly rev in `backtest_v5.py`) |
 | `--market EU` | Euronext / XETRA / LSE / SIX / Nordic | **260** (13 × 20) | `^STOXX50E` | `0.30%` |
 | `--market JP` | Tokyo Stock Exchange (`.T`) | **260** (13 × 20) | `^N225` | `0.20%` |
 | `--market HK` | Hong Kong Exchange (`.HK`) | **260** (13 × 20) | `^HSI` | `0.45%` (incl. stamp duty) |
-| `--market TW` | TWSE / TPEx (`.TW` / `.TWO`) | **300** (13 × ≥20) | `^TWII` | `0.585%` (+ FinMind monthly rev in `backtest_v5.py`) |
-| `--market GLOBAL` | Auto-aggregated across all regional markets | **1,340+** (13 × ≥100) | `ACWI` | `0.30%` |
+| `--market GLOBAL` | Auto-aggregated across all regional markets | **2,780+** (13 × ≥115) | `ACWI` | `0.30%` |
 | `--tickers ...` / `--universe-file` | Any custom Yahoo Finance symbols or JSON | Unlimited | Custom (`ACWI`) | `0.20%` |
 
 Expand the database anytime with `manage_universe.py`:

@@ -24,8 +24,10 @@ def test_all_global_market_presets_have_250_plus_and_20_per_industry():
             assert len(members) >= 20, f"{mkt}.{ind} expected >= 20 stocks, got {len(members)}"
         total_regional += len(tickers)
 
+    assert len(get_market_tickers("US")) >= 1000
+    assert len(get_market_tickers("TW")) >= 1000
     global_tickers = get_market_tickers("GLOBAL")
-    assert len(global_tickers) >= 1250
+    assert len(global_tickers) >= 2780
     assert len(global_tickers) == total_regional
 
 
