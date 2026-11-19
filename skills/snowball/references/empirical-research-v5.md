@@ -67,10 +67,13 @@ $$F_{\text{NormVal}}(i,t) = z_{\text{cs}}\!\Big(V^{\text{core}}_i + 0.5\,z_{\tex
 
 *(For Taiwan cyclical sectors in `backtest_v5.py`, a 5-year rolling point-in-time median is additionally applied before z-scoring.)*
 
-### Pillar 4 — Quality & Cash-Flow Profitability (`F_Quality`, Weight = `0.20`)
-Within-industry profitability + cash-flow yield minus non-financial leverage:
+### Pillar 4 — Microeconomic Moat, Pricing Power & Capital Discipline (`F_Quality`, Weight = `0.20`)
+Grounded in Industrial Organization (**Lerner 1934** *RES*; **De Loecker, Eeckhout, & Unger 2020** *QJE*; **Peress 2010** *JF*) and Neoclassical *q*-Theory of Investment (**Cooper, Gulen, & Schill 2008** *JF*; **Hou, Xue, & Zhang 2015** *RFS*; **Novy-Marx 2013** *JFE*; **Ball et al. 2016** *JFE*; **Asness, Frazzini, & Pedersen 2019** *RAST*):
 
-$$F_{\text{Quality}}(i,t) = z_{\text{cs}}\!\Big(0.40\,z_{\text{ind}}(\text{ROE}_i) + 0.30\,z_{\text{ind}}(\text{OpMargin}_i) + 0.30\,z_{\text{ind}}(\text{GrossMargin}_i) + 0.25\,z_{\text{cs}}(\text{FCF/EV}_i) - 0.25\,z_{\text{non-fin}}(\text{D/E}_i)\Big)$$
+- **Lerner Pricing-Power Excess Markup**: $\Delta\text{GM}_i = \text{GrossMargin}_i - \operatorname{median}_{j \in G_i}(\text{GrossMargin}_j)$ captures firm-level demand inelasticity and ability to pass through inflation shocks.
+- **Capital Efficiency & Liquidity Buffer**: Combines within-industry `ROE` and Operating Margin, Cash-Flow Conversion (`FCF/EV`), non-financial liquidity (`CurrentRatio`), and penalizes excessive non-financial leverage (`D/E`):
+
+$$F_{\text{Quality}}(i,t) = z_{\text{cs}}\!\Big(0.30\,z_{\text{ind}}(\text{ROE}_i) + 0.25\,z_{\text{ind}}(\text{OpMargin}_i) + 0.25\,z_{\text{cs}}(\Delta\text{GM}_i) + 0.20\,z_{\text{cs}}(\text{FCF/EV}_i) + 0.15\,z_{\text{non-fin}}(\text{CurrentRatio}_i) - 0.20\,z_{\text{non-fin}}(\text{D/E}_i)\Big)$$
 
 ### Pillar 5 — Fundamental Growth (`F_Fund`, Weight = `0.10`)
 - Global live ranking (`global_ranker.py`): $F_{\text{Fund}} = z_{\text{cs}}\!\big(0.60\,z_{\text{cs}}(\text{RevYoY}_i) + 0.40\,z_{\text{cs}}(\text{EarnYoY}_i)\big)$ (clipped to $[-50\%, +150\%]$).
@@ -81,12 +84,23 @@ Combines Betting Against Beta and Low Idiosyncratic Volatility (26-week trailing
 
 $$F_{\text{LowRisk}}(i,t) = z_{\text{cs}}\!\Big(-0.5\,z_{\text{cs}}(\hat{\beta}_{i,t-1}) - 0.5\,z_{\text{cs}}(\hat{\sigma}_{\varepsilon,i,t})\Big)$$
 
-### Composite v6 Score & Pure-Price Historical Signal
-$$S_{v6}(i,t) = z_{\text{cs}}\!\Big(0.20\,F_{\text{MomQual}} + 0.15\,F_{\text{IndMom}} + 0.25\,F_{\text{NormVal}} + 0.20\,F_{\text{Quality}} + 0.10\,F_{\text{Fund}} + 0.10\,F_{\text{LowRisk}}\Big)$$
+### Macroeconomic Regime Conditioning (`macro_micro.py`, Strictly Lagged `shift(1)`)
+Rather than attempting fragile short-horizon macro timing, macroeconomic state variables (**Estrella & Mishkin 1998** *REStat*; **Gilchrist & Zakrajšek 2012** *AER*; **Adrian, Boyarchenko, & Giannone 2019** *AER*; **Bruno & Shin 2015** *RES*; **Kilian 2009** *AER*) dynamically condition the **bounded pillar weights** $\mathbf{w}(M^{\text{stress}}_{t-1}, M^{\text{rate}}_{t-1})$:
 
-For historical global pure-price backtesting (without point-in-time historical financial statement snapshots):
+$$M^{\text{stress}}_{t-1} = \operatorname{clip}\!\Big(0.35\,z_{52w}(\text{VIX}_{t-1}) - 0.35\,z_{52w}(\Delta_{13w}\ln\tfrac{\text{HYG}}{\text{IEF}}) - 0.15\,z_{52w}(y^{10Y}_{t-1} - y^{3M}_{t-1}) + 0.15\,z_{52w}(\Delta_{13w}\text{DXY}_{t-1}),\;-1.5,\;+1.5\Big)$$
 
-$$S_{\text{price},v6}(i,t) = z_{\text{cs}}\!\Big(0.45\,F_{\text{ResMom,Vol}} + 0.15\,F_{\text{FIP}} + 0.25\,F_{\text{IndMom}} + 0.15\,F_{\text{LowRisk}}\Big)$$
+$$M^{\text{rate}}_{t-1} = \operatorname{clip}\!\Big(0.67\,z_{52w}(\Delta_{13w} y^{10Y}_{t-1}) + 0.33\,z_{52w}(\Delta_{13w}\ln\text{CL}_{t-1}),\;-1.5,\;+1.5\Big)$$
+
+- **Credit Stress / Risk-Off ($M^{\text{stress}} > 0$)**: Rotates weight into Microeconomic Moat (`F_Quality`) and Defensive Low-Risk (`F_LowRisk`), trimming crash-prone Momentum.
+- **Rate-Hike / Inflation Shock ($M^{\text{rate}} > 0$)**: Rotates weight into Short-Duration Value (`F_NormVal`) and Pricing-Power Moat (`F_Quality`), trimming long-duration Growth (`F_Fund`).
+- **Expansion / Easy Conditions ($M^{\text{stress}} < 0, M^{\text{rate}} \le 0$)**: Leans toward Momentum Quality (`F_MomQual`), Industry Momentum (`F_IndMom`), and Growth (`F_Fund`).
+
+### Composite Macro-Micro v6 Score & Pure-Price Historical Signal
+$$S_{v6}(i,t) = z_{\text{cs}}\!\Big(w_{\text{mom}}(M)\,F_{\text{MomQual}} + w_{\text{ind}}(M)\,F_{\text{IndMom}} + w_{\text{val}}(M)\,F_{\text{NormVal}} + w_{\text{qual}}(M)\,F_{\text{Quality}} + w_{\text{fund}}(M)\,F_{\text{Fund}} + w_{\text{def}}(M)\,F_{\text{LowRisk}}\Big)$$
+
+For historical global pure-price backtesting (strictly point-in-time with lagged `macro_stress` defensive tilt):
+
+$$S_{\text{price},v6}(i,t) = z_{\text{cs}}\!\Big((0.45 - 0.10\,M^{\text{stress}}_{t-1})\,F_{\text{ResMom,Vol}} + 0.15\,F_{\text{FIP}} + (0.25 - 0.05\,M^{\text{stress}}_{t-1})\,F_{\text{IndMom}} + (0.15 + 0.15\,M^{\text{stress}}_{t-1})\,F_{\text{LowRisk}}\Big)$$
 
 ---
 

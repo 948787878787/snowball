@@ -44,9 +44,10 @@
   - **動能品質（`F_MomQual`，20%）**：波動率調整殘差動能（Blitz et al. 2011 *JEF*；Barroso & Santa-Clara 2015 *JFE*）結合「溫水煮青蛙」連續資訊平滑度（Frog-in-the-Pan `FIP`，Da, Gurun, & Warachka 2014 *RFS*），獎勵穩健趨勢、過濾暴漲暴跌彩票股。
   - **全組產業動能（`F_IndMom`，15%）**：12 週同業全組平均 alpha（Moskowitz & Grinblatt 1999 *JF*；Ehsani & Linnainmaa 2022 *JF*），消除小組排除自己造成的機械性反轉。
   - **資本結構中性複合價值（`F_NormVal`，25%）**：金融股採組內 `1/PBR`，非金融股採組內 `0.5 × 盈餘殖利率（嚴格 Trailing P/E，上限 15%）+ 0.5 × EBITDA/EV（上限 25%）`（Loughran & Wellman 2011 *JFQA*），搭配 `0.5 ×` 上限 `8.0%` 封頂殖利率（Boudoukh et al. 2007 *JF*）。
-  - **品質與現金流獲利能力（`F_Quality`，20%）**：組內 `ROE`、營業利益率、毛利率（Novy-Marx 2013 *JFE*；Fama & French 2015 *JFE*）加上自由現金流殖利率 `FCF/EV`（Ball et al. 2016 *JFE*）並扣除高槓桿非金融負債比（`QMJ`，Asness, Frazzini, & Pedersen 2019 *RAST*），有效防範價值陷阱。
+  - **個體經濟護城河與資本紀律（`F_Quality`，20%）**：納入勒納超額毛利定價權（`毛利率 − 同業中位數`，Lerner 1934 *RES*；De Loecker, Eeckhout, & Unger 2020 *QJE*）、組內 `ROE` 與營業利益率（Novy-Marx 2013 *JFE*）、自由現金流殖利率 `FCF/EV`（Ball et al. 2016 *JFE*）、非金融流動比率（`CurrentRatio`）並扣除高槓桿負債比（Hou, Xue, & Zhang 2015 *RFS*；`QMJ`，Asness et al. 2019 *RAST*）。
   - **基本面成長（`F_Fund`，10%）**：全球採營收＋盈餘年增率，台股回測採嚴格延後至次月 11 日的點對點月營收動能與加速度。
   - **防禦低風險（`F_LowRisk`，10%）**：對抗高 Beta（Betting Against Beta，Frazzini & Pedersen 2014 *JFE*）結合低特異波動率（Ang et al. 2006 *JF*），降低空頭回撤與動能崩盤風險。
+  - **總體經濟情境動態調節（`macro_micro.py`，嚴格滯後 `shift(1)` 防偷看）**：監控美債殖利率曲線（`^TNX - ^IRX`）、高收益信用利差（`HYG/IEF`）、波動率（`^VIX`）、美元流動性（`DX-Y.NYB`）與原油通膨衝擊（`CL=F`），在信用緊縮、升息通膨與景氣擴張三類總經情境間平滑調整六大支柱權重（Estrella & Mishkin 1998 *REStat*；Gilchrist & Zakrajšek 2012 *AER*；Bruno & Shin 2015 *RES*；Kilian 2009 *AER*）。
 - **機構級嚴格回測審計**：採用 4 組錯開一週的重疊子組合（Jegadeesh-Titman 4-Cohort）、真實每週盯市最大回撤（MDD）、Newey-West（`lags = 6`）t 檢定、對含息等權大盤的 Jensen's Alpha，以及含 `0.30%` 零股滑價＋手續費＋證交稅的個人現金流模擬器。
 - **極簡毛玻璃互動式 HTML 儀表板（`generate_dashboard.py`）**：單一獨立網頁檔，採高斯模糊毛玻璃（Liquid Glass）風格並自動適配系統／環境明暗色調；右上角收斂為單一**設定按鈕**，內建 **紅、橙、黃、綠、藍、靛、紫七彩主題色**、**五國語言切換（English 預設、繁體中文、日本語、한국어、Deutsch）** 與 **六種顯示貨幣即時換算（USD 預設、TWD、EUR、JPY、HKD、KRW）**，整合總投入金額、總資產、可自訂每月投入金額與預估年報酬率、未來一週行情、任務清單、線上持股編輯與第 1–10 年複利試算，並自動記憶於本機瀏覽器。
 - **機率預測校準計分器（`score_predictions.py`）**：自動計算預測命中率、平均 Brier Score 與 Brier Skill Score（BSS）。

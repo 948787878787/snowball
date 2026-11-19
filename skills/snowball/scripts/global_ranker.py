@@ -65,6 +65,14 @@ from global_universe import (
     list_markets,
     load_universe_file,
 )
+from macro_micro import (
+    BASELINE_V6_WEIGHTS,
+    compute_macro_regime_panel,
+    compute_micro_lerner_markup,
+    download_macro_series,
+    make_offline_macro_data,
+    regime_conditioned_weights,
+)
 
 BETA_WINDOW = 52
 BETA_MIN = 26
@@ -308,6 +316,7 @@ def _fetch_one_fundamental(sym: str) -> dict:
     d2e = _safe_float(info.get("debtToEquity"))
     if np.isfinite(d2e) and d2e < 0.0:
         d2e = np.nan
+    curr_ratio = _safe_float(info.get("currentRatio"), positive_only=True)
 
     fcf = _safe_float(info.get("freeCashflow"))
     ev_val = _safe_float(info.get("enterpriseValue"), positive_only=True)
@@ -331,6 +340,7 @@ def _fetch_one_fundamental(sym: str) -> dict:
         "gross_margin": gross_margin,
         "fcf_yield": fcf_yield,
         "debt_to_equity": d2e,
+        "current_ratio": curr_ratio,
     }
 
 
@@ -339,7 +349,7 @@ def fetch_global_fundamentals(tickers: list, max_workers: int = 8) -> pd.DataFra
     cols = [
         "name", "sector", "currency", "dividend_yield", "PER", "PBR", "ev_ebitda",
         "rev_growth", "earnings_growth", "roe", "op_margin", "gross_margin",
-        "fcf_yield", "debt_to_equity",
+        "fcf_yield", "debt_to_equity", "current_ratio",
     ]
     if not tickers:
         return pd.DataFrame(columns=cols)
@@ -367,6 +377,7 @@ def make_neutral_fundamentals(tickers: list) -> pd.DataFrame:
         "gross_margin": np.nan,
         "fcf_yield": np.nan,
         "debt_to_equity": np.nan,
+        "current_ratio": np.nan,
     }).set_index("ticker")
 
 
@@ -479,8 +490,9 @@ def score_latest_global(
     fundamentals: pd.DataFrame,
     groups: dict,
     model: str = "v6",
+    macro_regime: Optional[dict] = None,
 ) -> pd.DataFrame:
-    """Score latest global cross-section using v6 (6-pillar) or v5 (4-pillar) empirical formula."""
+    """Score latest global cross-section using v6 (Macro-Micro 6-pillar) or v5 (4-pillar) formula."""
     dt = price_factors["f_res_mom"].index[-1]
     tickers = list(price_factors["close_w"].columns)
     gmap = group_map_for(groups)
@@ -492,7 +504,7 @@ def score_latest_global(
     f_low_risk = price_factors["f_low_risk"].loc[dt].reindex(tickers).fillna(0.0)
 
     fund = fundamentals.reindex(tickers)
-    for col in ("ev_ebitda", "earnings_growth", "roe", "op_margin", "gross_margin", "fcf_yield", "debt_to_equity"):
+    for col in ("ev_ebitda", "earnings_growth", "roe", "op_margin", "gross_margin", "fcf_yield", "debt_to_equity", "current_ratio"):
         if col not in fund.columns:
             fund[col] = np.nan
 
@@ -521,17 +533,26 @@ def score_latest_global(
     val_yld = _cs_z_series(yld_cap)
     f_norm_val = _cs_z_series(val_core + 0.5 * val_yld)
 
-    # Pillar: Quality & Cash-Flow Profitability (Novy-Marx 2013, Fama-French 2015, Ball et al. 2016, AFP 2019 QMJ)
+    # Pillar: Microeconomic Moat, Pricing Power & Capital Discipline
+    # (Lerner excess markup + ROE + OpMargin + FCF Yield + Liquidity Buffer - Non-Financial Leverage)
     z_roe = _group_z_series(fund["roe"].clip(-0.5, 1.0), groups)
     z_opm = _group_z_series(fund["op_margin"].clip(-0.5, 0.8), groups)
-    z_gm = _group_z_series(fund["gross_margin"].clip(-0.2, 0.95), groups)
+    lerner_excess = compute_micro_lerner_markup(fund["gross_margin"], groups)
+    z_markup = _cs_z_series(lerner_excess)
     z_fcf = _cs_z_series(fund["fcf_yield"].clip(-FCF_YIELD_CAP, FCF_YIELD_CAP))
     non_fin_d2e = pd.Series(
         {t: (np.nan if gmap.get(t) in GLOBAL_PB_GROUPS else fund.loc[t, "debt_to_equity"]) for t in tickers},
         dtype=float,
     ).clip(0.0, 500.0)
+    non_fin_cr = pd.Series(
+        {t: (np.nan if gmap.get(t) in GLOBAL_PB_GROUPS else fund.loc[t, "current_ratio"]) for t in tickers},
+        dtype=float,
+    ).clip(0.2, 5.0)
     z_lev = _cs_z_series(non_fin_d2e)
-    f_quality = _cs_z_series(0.40 * z_roe + 0.30 * z_opm + 0.30 * z_gm + 0.25 * z_fcf - 0.25 * z_lev)
+    z_liq = _cs_z_series(non_fin_cr)
+    f_quality = _cs_z_series(
+        0.30 * z_roe + 0.25 * z_opm + 0.25 * z_markup + 0.20 * z_fcf + 0.15 * z_liq - 0.20 * z_lev
+    )
 
     # Pillar: Fundamental Growth (Revenue YoY + Earnings YoY)
     z_rev = _cs_z_series(fund["rev_growth"].clip(-0.5, 1.5))
@@ -539,22 +560,29 @@ def score_latest_global(
     has_earn = fund["earnings_growth"].notna().any()
     f_fin = _cs_z_series(0.60 * z_rev + 0.40 * z_earn) if (model == "v6" and has_earn) else z_rev
 
-    # Composite Scores
+    # Macroeconomic Regime-Conditioned Weights (strictly bounded, sums to 1.00)
+    if macro_regime is not None:
+        w = regime_conditioned_weights(
+            macro_regime.get("macro_stress", 0.0),
+            macro_regime.get("rate_inflation", 0.0),
+        )
+    else:
+        w = BASELINE_V6_WEIGHTS
+
     raw_v5 = 0.5 * f_res + 0.5 * f_ind + 1.0 * z_rev + 1.5 * f_norm_val
     v5_score = _cs_z_series(raw_v5)
 
     raw_v6 = (
-        0.20 * f_mom_qual
-        + 0.15 * f_ind
-        + 0.25 * f_norm_val
-        + 0.20 * f_quality
-        + 0.10 * f_fin
-        + 0.10 * f_low_risk
+        w["mom_qual"] * f_mom_qual
+        + w["ind_mom"] * f_ind
+        + w["norm_val"] * f_norm_val
+        + w["quality"] * f_quality
+        + w["fund"] * f_fin
+        + w["low_risk"] * f_low_risk
     )
     v6_score = _cs_z_series(raw_v6)
 
     score_col = "v5_score" if model.lower() == "v5" else "v6_score"
-    active_score = v5_score if model.lower() == "v5" else v6_score
 
     out = pd.DataFrame({
         "ticker": tickers,
@@ -568,6 +596,7 @@ def score_latest_global(
         "fip": f_fip.values,
         "ind_mom": f_ind.values,
         "norm_val": f_norm_val.values,
+        "micro_moat": f_quality.values,
         "quality": f_quality.values,
         "low_risk": f_low_risk.values,
         "v5_score": v5_score.values,
@@ -583,24 +612,37 @@ def backtest_global_staggered(
     buy_frac: float = 0.20,
     membership_mask: Optional[pd.DataFrame] = None,
     model: str = "v6",
+    macro_panel: Optional[pd.DataFrame] = None,
 ) -> dict:
-    """4-cohort staggered historical backtest with realistic Next-Trading-Day Open execution.
-
-    Pure-price point-in-time signals:
-    - v6: 0.45 * Vol-Scaled ResMom + 0.15 * Frog-in-the-Pan + 0.25 * IndMom + 0.15 * LowRisk (BAB+IVOL)
-    - v5: 0.50 * ResMom + 0.50 * IndMom
+    """4-cohort staggered historical backtest with realistic Next-Trading-Day Open execution
+    and optional lagged Macroeconomic Regime Conditioning.
     """
     if model.lower() == "v5":
         sig = ft.cs_zscore(
             price_factors["f_res_mom"].fillna(0.0) + price_factors["f_ind_mom"].fillna(0.0)
         ).where(price_factors["f_res_mom"].notna())
     else:
-        sig = ft.cs_zscore(
-            0.45 * price_factors["f_res_mom_vol"].fillna(0.0)
-            + 0.15 * price_factors["f_fip"].fillna(0.0)
-            + 0.25 * price_factors["f_ind_mom"].fillna(0.0)
-            + 0.15 * price_factors["f_low_risk"].fillna(0.0)
-        ).where(price_factors["f_res_mom_vol"].notna())
+        if macro_panel is not None and "macro_stress" in macro_panel.columns:
+            st = macro_panel["macro_stress"].reindex(price_factors["f_res_mom_vol"].index).fillna(0.0).clip(-1.5, 1.5)
+            # Dynamic defensive shift under lagged macro stress (anti-momentum-crash)
+            w_mom = (0.45 - 0.10 * st).clip(0.25, 0.55)
+            w_fip = pd.Series(0.15, index=st.index)
+            w_ind = (0.25 - 0.05 * st).clip(0.15, 0.30)
+            w_def = (0.15 + 0.15 * st).clip(0.05, 0.35)
+            raw_sig = (
+                price_factors["f_res_mom_vol"].fillna(0.0).mul(w_mom, axis=0)
+                + price_factors["f_fip"].fillna(0.0).mul(w_fip, axis=0)
+                + price_factors["f_ind_mom"].fillna(0.0).mul(w_ind, axis=0)
+                + price_factors["f_low_risk"].fillna(0.0).mul(w_def, axis=0)
+            )
+            sig = ft.cs_zscore(raw_sig).where(price_factors["f_res_mom_vol"].notna())
+        else:
+            sig = ft.cs_zscore(
+                0.45 * price_factors["f_res_mom_vol"].fillna(0.0)
+                + 0.15 * price_factors["f_fip"].fillna(0.0)
+                + 0.25 * price_factors["f_ind_mom"].fillna(0.0)
+                + 0.15 * price_factors["f_low_risk"].fillna(0.0)
+            ).where(price_factors["f_res_mom_vol"].notna())
 
     if membership_mask is not None:
         aligned_mask = membership_mask.reindex(index=sig.index, columns=sig.columns).fillna(False).astype(bool)
@@ -736,6 +778,7 @@ def make_offline_demo_data(groups: dict) -> tuple:
         "gross_margin": np.round(0.20 + (idx_arr % 6) * 0.10, 3),
         "fcf_yield": np.round(0.01 + (idx_arr % 6) * 0.02, 3),
         "debt_to_equity": np.round(20.0 + (idx_arr % 5) * 35.0, 1),
+        "current_ratio": np.round(0.9 + (idx_arr % 5) * 0.45, 2),
     }).set_index("ticker")
     return close_df, open_df, bench, fund_df
 
@@ -807,6 +850,7 @@ def main() -> None:
     parser.add_argument("--period", default="5y", help="Yahoo Finance history window (default: 5y)")
     parser.add_argument("--top", type=int, default=20, help="Number of top-ranked stocks to display")
     parser.add_argument("--skip-fundamentals", action="store_true", help="Skip per-ticker Yahoo fundamental fetch (faster for 250+ tickers)")
+    parser.add_argument("--no-macro", action="store_true", help="Disable macroeconomic regime conditioning (use static baseline v6 weights)")
     parser.add_argument("--backtest", action="store_true", help="Also run 4-cohort staggered historical backtest (Next-Day Open execution)")
     parser.add_argument("--offline-demo", action="store_true", help="Run on synthetic data without network")
     args = parser.parse_args()
@@ -821,11 +865,13 @@ def main() -> None:
 
     if args.offline_demo:
         close_d, open_d, bench_d, fund_df = make_offline_demo_data(groups)
+        macro_d = None if args.no_macro else make_offline_macro_data(close_d.index)
         mode_tag = f"OFFLINE DEMO ({len(tickers)} stocks)"
     else:
         close_d, open_d, bench_d = download_global_prices(tickers, benchmark, period=args.period)
         if convert_usd:
             close_d, open_d = convert_prices_to_usd(close_d, open_d, period=args.period)
+        macro_d = None if args.no_macro else download_macro_series(period=args.period)
         fund_df = (
             make_neutral_fundamentals(list(close_d.columns))
             if args.skip_fundamentals
@@ -835,11 +881,31 @@ def main() -> None:
         mode_tag = f"LIVE ({mkt_name}, {len(close_d.columns)}/{len(tickers)} stocks{fx_note})"
 
     pf = compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
-    ranked = score_latest_global(pf, fund_df, groups, model=args.model)
+    macro_panel = compute_macro_regime_panel(macro_d, pf["close_w"].index)
+    latest_macro = macro_panel.iloc[-1].to_dict() if not macro_panel.empty else None
+    active_weights = (
+        regime_conditioned_weights(latest_macro["macro_stress"], latest_macro["rate_inflation"])
+        if (latest_macro is not None and not args.no_macro)
+        else BASELINE_V6_WEIGHTS
+    )
+    ranked = score_latest_global(
+        pf,
+        fund_df,
+        groups,
+        model=args.model,
+        macro_regime=None if args.no_macro else latest_macro,
+    )
 
-    pd.set_option("display.width", 240)
-    pd.set_option("display.max_columns", 18)
+    pd.set_option("display.width", 260)
+    pd.set_option("display.max_columns", 20)
     print(f"=== Snowball Global {args.model.upper()} Ranking | {mkt_label} | {mode_tag} | Benchmark: {benchmark} ===")
+    if args.model == "v6" and latest_macro is not None and not args.no_macro:
+        w_str = ", ".join(f"{k}={v:.2f}" for k, v in active_weights.items())
+        print(
+            f"Macro Regime (lagged): {latest_macro['regime']} "
+            f"(stress={latest_macro['macro_stress']:+.2f}, rate_infl={latest_macro['rate_inflation']:+.2f})\n"
+            f"Dynamic Pillar Weights: {w_str}"
+        )
     print(ranked.head(args.top).round(3).to_string(index=False))
 
     if args.backtest:
@@ -849,7 +915,13 @@ def main() -> None:
                 "\n[NOTICE] Survivorship Bias Disclosure: Static current-day universe omits delisted stocks; "
                 "historical CAGR/Sharpe are upward-biased. Pass --membership-csv for point-in-time constituents."
             )
-        bt_res = backtest_global_staggered(pf, round_trip_cost=cost, membership_mask=mem_mask, model=args.model)
+        bt_res = backtest_global_staggered(
+            pf,
+            round_trip_cost=cost,
+            membership_mask=mem_mask,
+            model=args.model,
+            macro_panel=None if args.no_macro else macro_panel,
+        )
         print(f"\n=== 4-Cohort Staggered Pure-Price {args.model.upper()} Backtest (Next-Day Open Fill) ===")
         for k, v in bt_res.items():
             if isinstance(v, float):

@@ -99,6 +99,53 @@ def test_v6_fip_quality_and_low_risk_math():
     assert ranked.loc["QUAL", "v6_score"] > ranked.loc["TRAP", "v6_score"]
 
 
+def test_macro_regime_conditioning_and_micro_lerner_markup():
+    import macro_micro as mm
+
+    # 1. Dynamic weights stay bounded, sum to 1.0, and tilt economically across regimes
+    w_base = mm.regime_conditioned_weights(0.0, 0.0)
+    w_stress = mm.regime_conditioned_weights(1.2, 0.0)
+    w_infl = mm.regime_conditioned_weights(0.0, 1.2)
+    w_exp = mm.regime_conditioned_weights(-1.0, -0.5)
+    for w in (w_base, w_stress, w_infl, w_exp):
+        assert abs(sum(w.values()) - 1.0) < 1e-9
+        assert all(v > 0 for v in w.values())
+    # Credit stress tilts into Quality & Low-Risk and away from Momentum
+    assert w_stress["quality"] > w_base["quality"]
+    assert w_stress["low_risk"] > w_base["low_risk"]
+    assert w_stress["mom_qual"] < w_base["mom_qual"]
+    # Rate/inflation shock tilts into Short-Duration Value & Pricing-Power Quality and away from Growth
+    assert w_infl["norm_val"] > w_base["norm_val"]
+    assert w_infl["quality"] > w_base["quality"]
+    assert w_infl["fund"] < w_base["fund"]
+    # Expansion tilts toward Momentum
+    assert w_exp["mom_qual"] > w_base["mom_qual"]
+
+    # 2. Microeconomic Lerner excess markup rewards above-peer gross margin
+    gm = pd.Series({"A": 0.70, "B": 0.40, "C": 0.35, "D": 0.20})
+    markup = mm.compute_micro_lerner_markup(gm, {"g1": ("A", "B", "C", "D")})
+    assert markup["A"] > 0 and markup["D"] < 0
+    assert markup["A"] > markup["B"] > markup["C"] > markup["D"]
+
+    # 3. Macro panel strict shift(1) anti-look-ahead: last-bar shock does NOT leak into same-bar regime
+    dates = pd.bdate_range("2022-01-03", periods=400)
+    macro_d = mm.make_offline_macro_data(dates)
+    weeks = macro_d.resample("W-FRI").last().index
+    p1 = mm.compute_macro_regime_panel(macro_d, weeks)
+    macro_shocked = macro_d.copy()
+    macro_shocked.iloc[-1] = macro_shocked.iloc[-1] * 3.0  # shock on final trading day only
+    p2 = mm.compute_macro_regime_panel(macro_shocked, weeks)
+    assert abs(float(p1["macro_stress"].iloc[-1]) - float(p2["macro_stress"].iloc[-1])) < 1e-12
+
+    # 4. Macro-conditioned backtest runs cleanly end-to-end
+    groups = {"g1": ("A", "B", "C", "D", "E", "F", "G", "H")}
+    close_d, open_d, bench_d, _ = gr.make_offline_demo_data(groups)
+    pf = gr.compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
+    mp = mm.compute_macro_regime_panel(mm.make_offline_macro_data(close_d.index), pf["close_w"].index)
+    bt = gr.backtest_global_staggered(pf, round_trip_cost=0.001, model="v6", macro_panel=mp)
+    assert np.isfinite(bt["Port_CAGR"]) and bt["Model"] == "v6"
+
+
 def test_dividend_yield_and_trailing_pe_parsers():
     # Bug #2: Yahoo 2025 dividendYield=0.42 means 0.42%, NEVER 42% (capped to 8%)
     aapl_full = {
