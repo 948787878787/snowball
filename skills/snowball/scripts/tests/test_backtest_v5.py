@@ -62,6 +62,8 @@ def test_dashboard_template_and_injection():
     assert gd.TEMPLATE_HTML.exists()
     html = gd.TEMPLATE_HTML.read_text(encoding="utf-8")
     assert "backdrop-filter" in html
+    assert "setTheme(" not in html
+    assert "resetAll(" not in html
     for tint in ("red", "orange", "yellow", "green", "blue", "indigo", "violet"):
         assert f'data-tint="{tint}"' in html
         assert f"setTint('{tint}')" in html

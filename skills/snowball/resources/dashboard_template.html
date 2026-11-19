@@ -6,43 +6,13 @@
   <title>Snowball · Minimalist Liquid Glass Portfolio Workbench</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <style>
-    /* Theme tokens (scoped to data-theme so host theme tokens remain intact in Auto mode) */
+    /* Automatic theme adaptation (inherits host/system color scheme) */
     html {
       --glass-bg: color-mix(in srgb, var(--card) 62%, transparent);
       --glass-sub: color-mix(in srgb, var(--secondary) 58%, transparent);
       --glass-border: color-mix(in srgb, var(--foreground) 12%, transparent);
       --glass-highlight: color-mix(in srgb, var(--foreground) 6%, transparent);
-      --orb-opacity: 0.24;
-    }
-    [data-theme="light"] {
-      --background: #f5f7fb;
-      --card: #ffffff;
-      --secondary: #f1f5f9;
-      --border: rgba(15, 23, 42, 0.10);
-      --foreground: #0f172a;
-      --muted-foreground: #64748b;
-      --primary: #0f172a;
-      --primary-foreground: #ffffff;
-      --glass-bg: rgba(255, 255, 255, 0.62);
-      --glass-sub: rgba(255, 255, 255, 0.46);
-      --glass-border: rgba(255, 255, 255, 0.72);
-      --glass-highlight: rgba(255, 255, 255, 0.85);
-      --orb-opacity: 0.28;
-    }
-    [data-theme="dark"] {
-      --background: #080c14;
-      --card: #111827;
-      --secondary: #1e293b;
-      --border: rgba(255, 255, 255, 0.12);
-      --foreground: #f8fafc;
-      --muted-foreground: #94a3b8;
-      --primary: #f8fafc;
-      --primary-foreground: #0f172a;
-      --glass-bg: rgba(17, 24, 39, 0.54);
-      --glass-sub: rgba(30, 41, 59, 0.44);
-      --glass-border: rgba(255, 255, 255, 0.13);
-      --glass-highlight: rgba(255, 255, 255, 0.08);
-      --orb-opacity: 0.26;
+      --orb-opacity: 0.25;
     }
 
     /* 7 Rainbow Liquid Glass Tints (Red, Orange, Yellow, Green, Blue, Indigo, Violet) */
@@ -54,13 +24,15 @@
     [data-tint="indigo"] { --tint-rgb: 99, 102, 241; --tint-rgb2: 129, 140, 248;--tint-hex: #6366f1; --tint-text: #4f46e5; }
     [data-tint="violet"] { --tint-rgb: 168, 85, 247; --tint-rgb2: 192, 132, 252;--tint-hex: #a855f7; --tint-text: #9333ea; }
 
-    [data-theme="dark"][data-tint="yellow"] { --tint-text: #facc15; }
-    [data-theme="dark"][data-tint="orange"] { --tint-text: #fb923c; }
-    [data-theme="dark"][data-tint="green"]  { --tint-text: #34d399; }
-    [data-theme="dark"][data-tint="blue"]   { --tint-text: #60a5fa; }
-    [data-theme="dark"][data-tint="indigo"] { --tint-text: #818cf8; }
-    [data-theme="dark"][data-tint="violet"] { --tint-text: #c084fc; }
-    [data-theme="dark"][data-tint="red"]    { --tint-text: #f87171; }
+    @media (prefers-color-scheme: dark) {
+      [data-tint="yellow"] { --tint-text: #facc15; }
+      [data-tint="orange"] { --tint-text: #fb923c; }
+      [data-tint="green"]  { --tint-text: #34d399; }
+      [data-tint="blue"]   { --tint-text: #60a5fa; }
+      [data-tint="indigo"] { --tint-text: #818cf8; }
+      [data-tint="violet"] { --tint-text: #c084fc; }
+      [data-tint="red"]    { --tint-text: #f87171; }
+    }
 
     /* Ambient Liquid Glass Backdrop */
     .liquid-backdrop {
@@ -150,15 +122,6 @@
           <button onclick="setTint('indigo')" id="sw-indigo" title="靛 Indigo" aria-label="靛色毛玻璃" class="swatch" style="background:#6366f1;"></button>
           <button onclick="setTint('violet')" id="sw-violet" title="紫 Violet" aria-label="紫色毛玻璃" class="swatch" style="background:#a855f7;"></button>
         </div>
-
-        <!-- Light / Dark / System -->
-        <div class="glass rounded-full p-1 inline-flex items-center gap-0.5">
-          <button onclick="setTheme('light')" id="theme-light" class="px-3 py-1 rounded-full text-xs font-medium transition">淺色</button>
-          <button onclick="setTheme('dark')"  id="theme-dark"  class="px-3 py-1 rounded-full text-xs font-medium transition">深色</button>
-          <button onclick="setTheme('auto')"  id="theme-auto"  class="px-3 py-1 rounded-full text-xs font-medium transition">自動</button>
-        </div>
-
-        <button onclick="resetAll()" class="glass rounded-full px-3 py-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition">重設</button>
       </div>
     </header>
 
@@ -399,7 +362,6 @@
     const CURR_PREFIX = { USD: "$", JPY: "¥", EUR: "€", HKD: "HK$", GBP: "£", TWD: "" };
 
     let state = {
-      theme: "auto",
       tint: DASHBOARD_DATA.defaultTint || "blue",
       monthly: DASHBOARD_DATA.defaultMonthly,
       extra: 0,
@@ -429,7 +391,6 @@
         const raw = localStorage.getItem(DASHBOARD_DATA.storageKey);
         if (!raw) return;
         const s = JSON.parse(raw);
-        if (s.theme) state.theme = s.theme;
         if (s.tint && TINT_HEX[s.tint]) state.tint = s.tint;
         if (typeof s.monthly === "number") state.monthly = s.monthly;
         if (typeof s.extra === "number") state.extra = s.extra;
@@ -448,7 +409,6 @@
     function saveState() {
       try {
         localStorage.setItem(DASHBOARD_DATA.storageKey, JSON.stringify({
-          theme: state.theme,
           tint: state.tint,
           monthly: state.monthly,
           extra: state.extra,
@@ -459,22 +419,6 @@
       } catch (e) {}
     }
 
-    function resetAll() {
-      try { localStorage.removeItem(DASHBOARD_DATA.storageKey); } catch (e) {}
-      state = {
-        theme: "auto",
-        tint: DASHBOARD_DATA.defaultTint || "blue",
-        monthly: DASHBOARD_DATA.defaultMonthly,
-        extra: 0,
-        rate: DASHBOARD_DATA.defaultRate || 8.5,
-        filter: "ALL",
-        editMode: false,
-        doneTasks: {},
-        holdings: JSON.parse(JSON.stringify(DASHBOARD_DATA.holdings || []))
-      };
-      init();
-    }
-
     function totals() {
       let cost = 0, mv = 0;
       state.holdings.forEach(h => {
@@ -483,19 +427,6 @@
         mv += h.shares * h.price * fx;
       });
       return { cost, mv, pnl: mv - cost, pct: cost > 0 ? (mv / cost - 1) * 100 : 0 };
-    }
-
-    function setTheme(mode) {
-      state.theme = mode;
-      const root = document.documentElement;
-      if (mode === "auto") root.removeAttribute("data-theme");
-      else root.setAttribute("data-theme", mode);
-      ["light", "dark", "auto"].forEach(m => {
-        document.getElementById("theme-" + m).className = m === mode
-          ? "px-3 py-1 rounded-full text-xs font-semibold tint-btn-active transition"
-          : "px-3 py-1 rounded-full text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition";
-      });
-      saveState();
     }
 
     function setTint(tint) {
@@ -739,7 +670,6 @@
     }
 
     function init() {
-      setTheme(state.theme);
       setTint(state.tint);
       document.getElementById("in-monthly").value = state.monthly;
       document.getElementById("in-extra").value = state.extra;
