@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>v5 實證投資與現金流工作台</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    [data-theme="light"] {
+      --background: #f8fafc;
+      --card: #ffffff;
+      --secondary: #f1f5f9;
+      --border: #e2e8f0;
+      --foreground: #0f172a;
+      --muted-foreground: #64748b;
+      --primary: #0f172a;
+      --primary-foreground: #ffffff;
+      --secondary-foreground: #334155;
+    }
+    [data-theme="dark"] {
+      --background: #090d16;
+      --card: #111827;
+      --secondary: #1a2333;
+      --border: #243044;
+      --foreground: #f1f5f9;
+      --muted-foreground: #94a3b8;
+      --primary: #10b981;
+      --primary-foreground: #022c22;
+      --secondary-foreground: #e2e8f0;
+    }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { opacity: 0.6; }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased transition-colors duration-200">
+  <div class="max-w-5xl mx-auto px-4 py-6 md:px-8 md:py-10 space-y-8">
+
+    <!-- Minimalist Top Bar -->
+    <header class="flex flex-col gap-5">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="space-y-1.5">
+          <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-medium bg-[var(--secondary)] text-[var(--foreground)] border border-[var(--border)]">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>v5 正式版
+            </span>
+            <span id="hdr-date">收盤 2026-11-18</span>
+            <span>·</span>
+            <span id="hdr-model-date">v5 週期 2026-11-13</span>
+            <span>·</span>
+            <span id="save-badge" class="text-emerald-500 hidden">已自動儲存在本機瀏覽器</span>
+          </div>
+          <h1 id="hdr-title" class="text-2xl md:text-3xl font-semibold tracking-tight text-[var(--foreground)]">實證投資與現金流工作台</h1>
+        </div>
+
+        <!-- Theme Switcher & Reset -->
+        <div class="flex items-center gap-2 self-start sm:self-auto">
+          <div class="inline-flex items-center bg-[var(--card)] border border-[var(--border)] rounded-xl p-1 gap-1">
+            <button onclick="setTheme('light')" id="theme-light" class="theme-btn px-3 py-1.5 rounded-lg text-xs font-medium transition">淺色</button>
+            <button onclick="setTheme('dark')" id="theme-dark" class="theme-btn px-3 py-1.5 rounded-lg text-xs font-medium transition">深色</button>
+            <button onclick="setTheme('auto')" id="theme-auto" class="theme-btn px-3 py-1.5 rounded-lg text-xs font-medium transition">跟隨系統</button>
+          </div>
+          <button onclick="resetLocalState()" title="清除本機暫存並恢復預設數據" class="px-2.5 py-2 rounded-xl text-xs text-[var(--muted-foreground)] bg-[var(--card)] border border-[var(--border)] hover:text-[var(--foreground)] transition">重設</button>
+        </div>
+      </div>
+
+      <!-- Clean 4-Metric Strip + Inline Editable Monthly Deposit -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 tabular-nums">
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 space-y-1">
+          <div class="text-xs text-[var(--muted-foreground)]">目前總資產 (自動重算)</div>
+          <div id="kpi-total-mv" class="text-2xl font-semibold tracking-tight">--</div>
+          <div id="kpi-total-pnl" class="text-xs">--</div>
+        </div>
+
+        <div class="bg-[var(--card)] border border-emerald-500/40 rounded-2xl p-4 space-y-1.5">
+          <label for="global-monthly" class="block text-xs font-medium text-emerald-500">每月投入金額 (自動記憶)</label>
+          <div class="flex items-baseline gap-1.5">
+            <input
+              id="global-monthly"
+              type="number"
+              min="500"
+              max="500000"
+              step="500"
+              value="10000"
+              oninput="syncMonthly(this.value)"
+              class="w-full bg-[var(--secondary)] border border-[var(--border)] rounded-lg px-2.5 py-1 text-lg font-semibold text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+            />
+            <span class="text-xs text-[var(--muted-foreground)] shrink-0">元/月</span>
+          </div>
+          <div id="global-split-hint" class="text-xs text-[var(--muted-foreground)]">核心 6,000 · 衛星 4,000</div>
+        </div>
+
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 space-y-1">
+          <div id="kpi-card3-title" class="text-xs text-[var(--muted-foreground)]">v5 樣本外 Jensen Alpha</div>
+          <div id="kpi-card3-val" class="text-2xl font-semibold tracking-tight">--</div>
+          <div id="kpi-card3-sub" class="text-xs text-emerald-500">--</div>
+        </div>
+
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 space-y-1">
+          <div id="kpi-card4-title" class="text-xs text-[var(--muted-foreground)]">v5 榜首衛星候選</div>
+          <div id="kpi-card4-val" class="text-2xl font-semibold tracking-tight">--</div>
+          <div id="kpi-card4-sub" class="text-xs text-amber-500">--</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Minimal Underline Tabs -->
+    <nav class="border-b border-[var(--border)] flex gap-6 overflow-x-auto" role="tablist">
+      <button onclick="switchTab('overview')" id="tab-overview" class="tab-btn pb-3 text-sm font-semibold border-b-2 border-emerald-500 text-[var(--foreground)] whitespace-nowrap transition">持倉與考核</button>
+      <button onclick="switchTab('screener')" id="tab-screener" class="tab-btn pb-3 text-sm font-medium border-b-2 border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)] whitespace-nowrap transition">v5 選股與買單計算機</button>
+      <button onclick="switchTab('audit')" id="tab-audit" class="tab-btn pb-3 text-sm font-medium border-b-2 border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)] whitespace-nowrap transition">回測審計</button>
+      <button onclick="switchTab('simulator')" id="tab-simulator" class="tab-btn pb-3 text-sm font-medium border-b-2 border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)] whitespace-nowrap transition">十年複利試算</button>
+    </nav>
+
+    <!-- TAB 1: Overview & Editable Portfolio -->
+    <section id="panel-overview" class="space-y-6">
+      <div id="milestones-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+
+      <!-- Editable Portfolio Table -->
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 md:p-6 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 class="text-base font-semibold">實盤持倉明細（可直接修改股數、成本與目標賣價）</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">修改後自動存於本機瀏覽器並即時重算總資產、損益與單股權重</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="toggleEditHoldings()" id="btn-edit-hold" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500 transition">編輯持股</button>
+            <div class="inline-flex bg-[var(--secondary)] rounded-lg p-1 gap-1">
+              <button onclick="filterHoldings('ALL')" class="hold-filter px-2.5 py-1 rounded-md text-xs font-medium transition" data-filter="ALL">全部</button>
+              <button onclick="filterHoldings('TW')" class="hold-filter px-2.5 py-1 rounded-md text-xs font-medium transition" data-filter="TW">台股</button>
+              <button onclick="filterHoldings('US')" class="hold-filter px-2.5 py-1 rounded-md text-xs font-medium transition" data-filter="US">美股</button>
+              <button onclick="filterHoldings('SELL')" class="hold-filter px-2.5 py-1 rounded-md text-xs font-medium transition" data-filter="SELL">待賣名單</button>
+            </div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-[var(--border)] text-xs text-[var(--muted-foreground)]">
+                <th class="py-2.5 pr-3 font-medium">標的</th>
+                <th class="py-2.5 px-2 text-right font-medium">股數</th>
+                <th class="py-2.5 px-2 text-right font-medium">成本</th>
+                <th class="py-2.5 px-2 text-right font-medium">現價</th>
+                <th class="py-2.5 px-2 text-right font-medium">目標賣價</th>
+                <th class="py-2.5 px-2 text-right font-medium">損益</th>
+                <th class="py-2.5 px-2 text-right font-medium">權重</th>
+                <th class="py-2.5 pl-2 font-medium">執行策略</th>
+              </tr>
+            </thead>
+            <tbody id="holdings-tbody" class="divide-y divide-[var(--border)] tabular-nums"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: Monthly Odd-Lot Order Calculator + v5 Screener -->
+    <section id="panel-screener" class="hidden space-y-6">
+      <!-- Monthly Core / Satellite Odd-Lot Buy Order Calculator -->
+      <div class="bg-[var(--card)] border border-emerald-500/35 rounded-2xl p-5 md:p-6 space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-semibold">本月「核心＋衛星」零股下單計算機</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">依照每月投入金額與核心比例，自動試算本月零股股數與預估手續費（點擊下方清單任一標的即可切換衛星買單）</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-[var(--muted-foreground)]">核心占比</span>
+            <input id="in-core-ratio" type="number" min="0" max="100" step="5" value="60" oninput="syncCoreRatio(this.value)"
+              class="w-16 text-right bg-[var(--secondary)] border border-[var(--border)] rounded-lg px-2 py-1 font-semibold tabular-nums" />
+            <span class="text-[var(--muted-foreground)]">%</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 tabular-nums">
+          <!-- Core Draft -->
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-sky-500">核心定期定額草稿（防禦收息底盤）</span>
+              <span id="ord-core-budget" class="font-semibold">--</span>
+            </div>
+            <div id="ord-core-detail" class="text-sm font-semibold">--</div>
+            <div id="ord-core-sub" class="text-xs text-[var(--muted-foreground)]">--</div>
+          </div>
+
+          <!-- Satellite Draft -->
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-emerald-500">衛星 v5 現金流狙擊草稿（只買不賣）</span>
+              <span id="ord-sat-budget" class="font-semibold">--</span>
+            </div>
+            <div id="ord-sat-detail" class="text-sm font-semibold">--</div>
+            <div id="ord-sat-sub" class="text-xs text-[var(--muted-foreground)]">--</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- v5 Screener Table -->
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 md:p-6 space-y-4">
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div class="space-y-1">
+            <h2 class="text-base font-semibold">v5 高息防禦版選股雷達（84 檔）</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">殘差動能 + 全組產業動能 + 月營收 + 8% 封頂同業中性價值（點擊「試算」套入上方衛星買單）</p>
+          </div>
+          <div class="flex flex-wrap gap-3 items-center text-xs">
+            <label class="text-[var(--muted-foreground)] flex items-center gap-1.5">
+              單價
+              <select id="filter-max-price" onchange="renderScreener()" class="bg-[var(--secondary)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]">
+                <option value="99999">不限</option>
+                <option value="500" selected>≤ 500 元</option>
+                <option value="150">≤ 150 元</option>
+                <option value="100">≤ 100 元</option>
+              </select>
+            </label>
+            <label class="text-[var(--muted-foreground)] flex items-center gap-1.5">
+              殖利率
+              <select id="filter-min-yield" onchange="renderScreener()" class="bg-[var(--secondary)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]">
+                <option value="0">不限</option>
+                <option value="3" selected>≥ 3.0%</option>
+                <option value="4">≥ 4.0%</option>
+                <option value="5">≥ 5.0%</option>
+              </select>
+            </label>
+            <label class="text-[var(--muted-foreground)] flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" id="filter-watch-only" onchange="renderScreener()" class="rounded accent-emerald-500" />
+              僅看觀察/持倉
+            </label>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-[var(--border)] text-xs text-[var(--muted-foreground)]">
+                <th class="py-2.5 pr-2 font-medium">排名</th>
+                <th class="py-2.5 px-2 font-medium">標的</th>
+                <th class="py-2.5 px-2 font-medium">產業</th>
+                <th class="py-2.5 px-2 text-right font-medium">現價</th>
+                <th class="py-2.5 px-2 text-right font-medium">殖利率</th>
+                <th class="py-2.5 px-2 text-right font-medium">本益比</th>
+                <th class="py-2.5 px-2 text-right font-medium">v5 總分</th>
+                <th class="py-2.5 px-2 text-right font-medium">優先序</th>
+                <th class="py-2.5 pl-2 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody id="screener-tbody" class="divide-y divide-[var(--border)] tabular-nums"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: Audit -->
+    <section id="panel-audit" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 space-y-4">
+          <div>
+            <h2 class="text-base font-semibold">樣本外保留期（2024–2026）Jensen Alpha</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">4 組錯開 · 真實週線 MDD · 含息等權基準 · NW lags=6</p>
+          </div>
+          <div id="audit-bars" class="space-y-4"></div>
+        </div>
+
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 space-y-4">
+          <div>
+            <h2 class="text-base font-semibold">只買不賣現金流模擬器（2024–2026）</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">含 0.3% 零股滑價、買賣手續費與證交稅</p>
+          </div>
+          <div id="sim-bars" class="space-y-3.5"></div>
+        </div>
+      </div>
+
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 space-y-3">
+        <h2 class="text-base font-semibold">保留期審計明細（2024-01 ～ 2026-11）</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm tabular-nums">
+            <thead>
+              <tr class="border-b border-[var(--border)] text-xs text-[var(--muted-foreground)]">
+                <th class="py-2.5 pr-3 font-medium">模型</th>
+                <th class="py-2.5 px-2 text-right font-medium">Rank IC (t)</th>
+                <th class="py-2.5 px-2 text-right font-medium">多頭毛貢獻</th>
+                <th class="py-2.5 px-2 text-right font-medium">Beta</th>
+                <th class="py-2.5 px-2 text-right font-medium">Jensen Alpha (t)</th>
+                <th class="py-2.5 px-2 text-right font-medium">週線 MDD</th>
+                <th class="py-2.5 px-2 text-right font-medium">夏普</th>
+                <th class="py-2.5 pl-2 text-right font-medium">月換手 / 產業數</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody" class="divide-y divide-[var(--border)]"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: Interactive 10-Year Compounding Simulator -->
+    <section id="panel-simulator" class="hidden space-y-6">
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 md:p-6 space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold">十年複利與每月投入金額試算器</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">所有數值皆可直接鍵盤輸入並自動儲存，即時推算破百萬年份與股息黃金交叉</p>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="applyPreset(0, 10000, 8.5)" class="px-2.5 py-1 rounded-lg text-xs bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500 transition">10,000/月</button>
+            <button onclick="applyPreset(0, 15000, 8.5)" class="px-2.5 py-1 rounded-lg text-xs bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500 transition">15,000/月</button>
+            <button onclick="applyPreset(20, 10000, 8.5)" class="px-2.5 py-1 rounded-lg text-xs bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500 transition">+20萬啟動金</button>
+            <button onclick="applyPreset(0, 10000, 10.1)" class="px-2.5 py-1 rounded-lg text-xs bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500 transition">雙引擎 10.1%</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <label for="in-monthly" class="text-xs font-medium text-[var(--muted-foreground)]">每月增加金額 (元)</label>
+              <input id="in-monthly" type="number" min="500" max="500000" step="500" value="10000" oninput="syncMonthly(this.value)"
+                class="w-28 text-right bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
+            </div>
+            <input id="sl-monthly" type="range" min="1000" max="30000" step="500" value="10000" oninput="syncMonthly(this.value)" class="w-full accent-emerald-500" />
+            <div class="flex justify-between text-xs text-[var(--muted-foreground)] tabular-nums"><span>1,000</span><span>15,000</span><span>30,000+</span></div>
+          </div>
+
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <label for="in-extra" class="text-xs font-medium text-[var(--muted-foreground)]">額外啟動資金 (萬元)</label>
+              <input id="in-extra" type="number" min="0" max="500" step="1" value="0" oninput="syncExtra(this.value)"
+                class="w-28 text-right bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-sky-500/50" />
+            </div>
+            <input id="sl-extra" type="range" min="0" max="50" step="5" value="0" oninput="syncExtra(this.value)" class="w-full accent-sky-500" />
+            <div class="flex justify-between text-xs text-[var(--muted-foreground)] tabular-nums"><span>0 萬</span><span>20 萬</span><span>50 萬+</span></div>
+          </div>
+
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <label for="in-rate" class="text-xs font-medium text-[var(--muted-foreground)]">年化總報酬 (%)</label>
+              <input id="in-rate" type="number" min="2" max="20" step="0.1" value="8.5" oninput="syncRate(this.value)"
+                class="w-28 text-right bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500/50" />
+            </div>
+            <input id="sl-rate" type="range" min="4" max="14" step="0.5" value="8.5" oninput="syncRate(this.value)" class="w-full accent-amber-500" />
+            <div class="flex justify-between text-xs text-[var(--muted-foreground)] tabular-nums"><span>5.5% 保守</span><span>8.5% 高息</span><span>10.1% 雙引擎</span></div>
+          </div>
+        </div>
+
+        <div id="sim-feedback" class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl px-4 py-3 text-xs leading-relaxed text-[var(--foreground)]"></div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5 tabular-nums">
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4">
+            <div class="text-xs text-[var(--muted-foreground)]">第 5 年總資產</div>
+            <div id="kpi-y5" class="text-xl font-semibold mt-1">--</div>
+          </div>
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4">
+            <div class="text-xs text-[var(--muted-foreground)]">第 10 年總資產</div>
+            <div id="kpi-y10" class="text-xl font-semibold text-emerald-500 mt-1">--</div>
+          </div>
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4">
+            <div class="text-xs text-[var(--muted-foreground)]">第 10 年累計淨賺</div>
+            <div id="kpi-profit" class="text-xl font-semibold text-sky-500 mt-1">--</div>
+          </div>
+          <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4">
+            <div class="text-xs text-[var(--muted-foreground)]">第 10 年每月被動股息</div>
+            <div id="kpi-div" class="text-xl font-semibold text-amber-500 mt-1">--</div>
+          </div>
+        </div>
+
+        <div class="bg-[var(--secondary)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span class="font-medium">10 年資產複利成長曲線 vs. 累計總投入本金（萬元）</span>
+            <div class="flex gap-4 text-[var(--muted-foreground)]">
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block"></span>總資產市值</span>
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-slate-400 inline-block"></span>累計本金</span>
+            </div>
+          </div>
+          <svg id="sim-svg" viewBox="0 0 760 270" class="w-full h-auto"></svg>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    /*__DATA_START__*/
+    const DASHBOARD_DATA = {
+  "storageKey": "tw_quant_v5_open_dashboard_v1",
+  "title": "tw-quant-factor-v5 實證選股與現金流工作台",
+  "priceDate": "2026-11-18",
+  "modelDate": "2026-11-13",
+  "fxUsdTwd": 32.5,
+  "defaultMonthly": 10000,
+  "defaultCoreRatio": 60,
+  "coreSymbol": {
+    "code": "0056",
+    "name": "Example High-Dividend ETF",
+    "price": 40.0
+  },
+  "defaultSatelliteCode": "5880",
+  "card3": {
+    "title": "v5 樣本外 Jensen Alpha",
+    "val": "+14.33%",
+    "sub": "NW6 t = 2.16 · 夏普 2.08"
+  },
+  "card4": {
+    "title": "v5 榜首衛星候選",
+    "val": "5880",
+    "sub": "點選「v5 選股與買單計算機」試算"
+  },
+  "watchCodes": [
+    "5880",
+    "3702",
+    "2347"
+  ],
+  "holdings": [
+    {
+      "mkt": "TW",
+      "code": "0056",
+      "name": "Example High-Dividend ETF",
+      "shares": 100,
+      "cost": 40.0,
+      "price": 40.0,
+      "targetSell": null,
+      "sellList": false,
+      "action": "Core monthly DCA"
+    },
+    {
+      "mkt": "TW",
+      "code": "2886",
+      "name": "Example Commercial Bank",
+      "shares": 100,
+      "cost": 45.0,
+      "price": 48.0,
+      "targetSell": 55.0,
+      "sellList": true,
+      "action": "Trim profit at target"
+    }
+  ],
+  "screener": [
+    {
+      "rank": 9,
+      "code": "5880",
+      "name": "合庫金",
+      "group": "純商銀",
+      "price": 27.5,
+      "yield": 3.82,
+      "per": 17.97,
+      "v5": 1.296
+    },
+    {
+      "rank": 12,
+      "code": "3702",
+      "name": "大聯大",
+      "group": "電子通路",
+      "price": 81.5,
+      "yield": 4.47,
+      "per": 5.21,
+      "v5": 1.147
+    },
+    {
+      "rank": 38,
+      "code": "2347",
+      "name": "聯強",
+      "group": "電子通路",
+      "price": 73.5,
+      "yield": 5.71,
+      "per": 8.45,
+      "v5": 0.189
+    }
+  ],
+  "auditModels": [
+    {
+      "name": "v3 平滑版",
+      "ic": 0.0773,
+      "icT": 3.93,
+      "longGross": 11.2,
+      "beta": 1.049,
+      "alpha": 10.36,
+      "t": 1.52,
+      "mdd": -18.1,
+      "sharpe": 1.88,
+      "turn": 31.9,
+      "sectors": 10.1,
+      "hl": false
+    },
+    {
+      "name": "v4 高息版",
+      "ic": 0.0924,
+      "icT": 4.57,
+      "longGross": 12.3,
+      "beta": 0.952,
+      "alpha": 10.31,
+      "t": 1.46,
+      "mdd": -15.7,
+      "sharpe": 1.84,
+      "turn": 38.1,
+      "sectors": 9.1,
+      "hl": false
+    },
+    {
+      "name": "v5 純三因子",
+      "ic": 0.095,
+      "icT": 5.14,
+      "longGross": 14.0,
+      "beta": 1.166,
+      "alpha": 11.15,
+      "t": 1.69,
+      "mdd": -23.2,
+      "sharpe": 1.88,
+      "turn": 27.2,
+      "sectors": 9.9,
+      "hl": false
+    },
+    {
+      "name": "v5 高息防禦版 ★",
+      "ic": 0.096,
+      "icT": 5.63,
+      "longGross": 14.6,
+      "beta": 0.961,
+      "alpha": 14.33,
+      "t": 2.16,
+      "mdd": -17.4,
+      "sharpe": 2.08,
+      "turn": 24.8,
+      "sectors": 11.2,
+      "hl": true
+    }
+  ],
+  "simBench": [
+    {
+      "name": "v5 高息防禦 (只買不賣+贏家減碼)",
+      "val": 204200,
+      "roi": "+104.2%",
+      "color": "bg-emerald-500"
+    },
+    {
+      "name": "v5 純三因子 (只買不賣+贏家減碼)",
+      "val": 198800,
+      "roi": "+98.8%",
+      "color": "bg-sky-500"
+    },
+    {
+      "name": "基準1：84 檔等權定期定額",
+      "val": 194200,
+      "roi": "+94.2%",
+      "color": "bg-slate-400"
+    },
+    {
+      "name": "核心+衛星 60/40 (低集中度 ★)",
+      "val": 187700,
+      "roi": "+87.7%",
+      "color": "bg-amber-500"
+    },
+    {
+      "name": "基準2：高息籃子 (ETF 代理)",
+      "val": 178900,
+      "roi": "+78.9%",
+      "color": "bg-slate-500"
+    }
+  ]
+};
+    /*__DATA_END__*/
+
+    // Persistent App State
+    let state = {
+      theme: "auto",
+      monthly: DASHBOARD_DATA.defaultMonthly,
+      extra: 0,
+      rate: 8.5,
+      coreRatio: DASHBOARD_DATA.defaultCoreRatio,
+      satCode: DASHBOARD_DATA.defaultSatelliteCode,
+      holdFilter: "ALL",
+      editMode: false,
+      holdings: JSON.parse(JSON.stringify(DASHBOARD_DATA.holdings))
+    };
+
+    function loadLocalState() {
+      try {
+        const raw = localStorage.getItem(DASHBOARD_DATA.storageKey);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved.theme) state.theme = saved.theme;
+        if (typeof saved.monthly === "number") state.monthly = saved.monthly;
+        if (typeof saved.extra === "number") state.extra = saved.extra;
+        if (typeof saved.rate === "number") state.rate = saved.rate;
+        if (typeof saved.coreRatio === "number") state.coreRatio = saved.coreRatio;
+        if (saved.satCode) state.satCode = saved.satCode;
+        // Merge user-edited shares / cost / targetSell onto latest live prices
+        if (Array.isArray(saved.holdings)) {
+          const mapSaved = Object.fromEntries(saved.holdings.map(h => [h.code, h]));
+          state.holdings = DASHBOARD_DATA.holdings.map(live => {
+            const s = mapSaved[live.code];
+            if (!s) return { ...live };
+            return {
+              ...live,
+              shares: typeof s.shares === "number" ? s.shares : live.shares,
+              cost: typeof s.cost === "number" ? s.cost : live.cost,
+              targetSell: s.targetSell !== undefined ? s.targetSell : live.targetSell
+            };
+          });
+        }
+      } catch (e) {}
+    }
+
+    function saveLocalState() {
+      try {
+        localStorage.setItem(DASHBOARD_DATA.storageKey, JSON.stringify({
+          theme: state.theme,
+          monthly: state.monthly,
+          extra: state.extra,
+          rate: state.rate,
+          coreRatio: state.coreRatio,
+          satCode: state.satCode,
+          holdings: state.holdings.map(h => ({ code: h.code, shares: h.shares, cost: h.cost, targetSell: h.targetSell }))
+        }));
+        const badge = document.getElementById("save-badge");
+        badge.classList.remove("hidden");
+      } catch (e) {}
+    }
+
+    function resetLocalState() {
+      try { localStorage.removeItem(DASHBOARD_DATA.storageKey); } catch (e) {}
+      state.theme = "auto";
+      state.monthly = DASHBOARD_DATA.defaultMonthly;
+      state.extra = 0;
+      state.rate = 8.5;
+      state.coreRatio = DASHBOARD_DATA.defaultCoreRatio;
+      state.satCode = DASHBOARD_DATA.defaultSatelliteCode;
+      state.editMode = false;
+      state.holdings = JSON.parse(JSON.stringify(DASHBOARD_DATA.holdings));
+      initUI();
+    }
+
+    function computePortfolioTotals() {
+      let totalMv = 0, totalCost = 0;
+      const weightByCode = {};
+      state.holdings.forEach(h => {
+        const mult = h.mkt === "US" ? DASHBOARD_DATA.fxUsdTwd : 1.0;
+        const mv = h.shares * h.price * mult;
+        const c = h.shares * h.cost * mult;
+        totalMv += mv;
+        totalCost += c;
+      });
+      state.holdings.forEach(h => {
+        const mult = h.mkt === "US" ? DASHBOARD_DATA.fxUsdTwd : 1.0;
+        weightByCode[h.code] = totalMv > 0 ? (h.shares * h.price * mult) / totalMv : 0;
+      });
+      return { totalMv, totalCost, totalPnl: totalMv - totalCost, pnlPct: totalCost > 0 ? (totalMv / totalCost - 1) * 100 : 0, weightByCode };
+    }
+
+    function setTheme(mode) {
+      state.theme = mode;
+      const root = document.documentElement;
+      if (mode === "auto") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", mode);
+      ["light", "dark", "auto"].forEach(m => {
+        const b = document.getElementById("theme-" + m);
+        b.className = m === mode
+          ? "theme-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] transition"
+          : "theme-btn px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition";
+      });
+      saveLocalState();
+    }
+
+    function switchTab(name) {
+      ["overview", "screener", "audit", "simulator"].forEach(t => {
+        document.getElementById("panel-" + t).classList.toggle("hidden", t !== name);
+        const btn = document.getElementById("tab-" + t);
+        btn.className = t === name
+          ? "tab-btn pb-3 text-sm font-semibold border-b-2 border-emerald-500 text-[var(--foreground)] whitespace-nowrap transition"
+          : "tab-btn pb-3 text-sm font-medium border-b-2 border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)] whitespace-nowrap transition";
+      });
+    }
+
+    function toggleEditHoldings() {
+      state.editMode = !state.editMode;
+      const btn = document.getElementById("btn-edit-hold");
+      btn.textContent = state.editMode ? "完成編輯" : "編輯持股";
+      btn.className = state.editMode
+        ? "px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 text-white transition"
+        : "px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500 transition";
+      renderAllLive();
+    }
+
+    function updateHoldingField(code, field, val) {
+      const h = state.holdings.find(x => x.code === code);
+      if (!h) return;
+      if (field === "targetSell") {
+        h.targetSell = val === "" ? null : Math.max(0, Number(val) || 0);
+      } else {
+        h[field] = Math.max(0, Number(val) || 0);
+      }
+      saveLocalState();
+      renderHeaderKPIs();
+      renderMilestones();
+      renderScreener();
+      updateSimulator();
+    }
+
+    function filterHoldings(mode) {
+      state.holdFilter = mode;
+      document.querySelectorAll(".hold-filter").forEach(b => {
+        b.className = b.dataset.filter === mode
+          ? "hold-filter px-2.5 py-1 rounded-md text-xs font-semibold bg-[var(--card)] text-[var(--foreground)] shadow-sm transition"
+          : "hold-filter px-2.5 py-1 rounded-md text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition";
+      });
+      renderHoldingsTable();
+    }
+
+    function renderHeaderKPIs() {
+      const { totalMv, totalPnl, pnlPct } = computePortfolioTotals();
+      document.getElementById("hdr-title").textContent = DASHBOARD_DATA.title;
+      document.getElementById("hdr-date").textContent = `收盤 ${DASHBOARD_DATA.priceDate}`;
+      document.getElementById("hdr-model-date").textContent = `v5 週期 ${DASHBOARD_DATA.modelDate}`;
+      document.getElementById("kpi-total-mv").innerHTML = `${Math.round(totalMv).toLocaleString()} <span class="text-xs font-normal text-[var(--muted-foreground)]">TWD</span>`;
+      const pnlEl = document.getElementById("kpi-total-pnl");
+      pnlEl.textContent = `未實現 ${totalPnl >= 0 ? "+" : ""}${Math.round(totalPnl).toLocaleString()} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)`;
+      pnlEl.className = `text-xs ${totalPnl >= 0 ? "text-emerald-500" : "text-rose-500"}`;
+
+      document.getElementById("kpi-card3-title").textContent = DASHBOARD_DATA.card3.title;
+      document.getElementById("kpi-card3-val").textContent = DASHBOARD_DATA.card3.val;
+      document.getElementById("kpi-card3-sub").textContent = DASHBOARD_DATA.card3.sub;
+      document.getElementById("kpi-card4-title").textContent = DASHBOARD_DATA.card4.title;
+      document.getElementById("kpi-card4-val").textContent = DASHBOARD_DATA.card4.val;
+      document.getElementById("kpi-card4-sub").textContent = DASHBOARD_DATA.card4.sub;
+    }
+
+    function renderMilestones() {
+      const coreAmt = Math.round(state.monthly * (state.coreRatio / 100));
+      const corePx = DASHBOARD_DATA.coreSymbol.price || 50;
+      const coreHold = state.holdings.find(h => h.code === DASHBOARD_DATA.coreSymbol.code);
+      const curShares = coreHold ? coreHold.shares : 0;
+      const sharesPerMo = Math.floor(coreAmt / corePx);
+      const sixMoTarget = curShares + sharesPerMo * 6;
+      const m3Pct = sixMoTarget > 0 ? Math.min(100, Math.round(curShares / sixMoTarget * 100)) : 0;
+
+      const targetHold = state.holdings.find(h => h.targetSell !== null);
+      const m1Cur = targetHold ? targetHold.price : 45.0;
+      const m1Tgt = (targetHold && targetHold.targetSell) ? targetHold.targetSell : 55.0;
+      const m1Pct = Math.min(100, (m1Cur / m1Tgt * 100)).toFixed(1);
+
+      document.getElementById("milestones-grid").innerHTML = `
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-[var(--muted-foreground)]">里程碑 01</span>
+            <span class="text-emerald-500 font-medium">${m1Cur >= m1Tgt ? "已達標" : "進行中"}</span>
+          </div>
+          <h3 class="text-sm font-semibold">目標獲利換股與超重贏家減碼</h3>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">當單一獲利持股超過目標權重 2 倍或達自訂目標賣價時，獲利減碼並轉入核心高息池。</p>
+          <div class="space-y-1.5 pt-1 tabular-nums">
+            <div class="flex justify-between text-xs"><span class="text-[var(--muted-foreground)]">${m1Cur.toFixed(2)} / ${m1Tgt.toFixed(2)} 元</span><span class="font-medium">${m1Pct}%</span></div>
+            <div class="w-full h-1.5 rounded-full bg-[var(--secondary)] overflow-hidden"><div class="h-full rounded-full bg-emerald-500" style="width:${m1Pct}%"></div></div>
+          </div>
+        </div>
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-[var(--muted-foreground)]">里程碑 02</span>
+            <span class="text-amber-500 font-medium">衛星低接雷達</span>
+          </div>
+          <h3 class="text-sm font-semibold">衛星狙擊 v5 前 20% 高息股</h3>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">每月衛星資金 ${Math.max(0, state.monthly - coreAmt).toLocaleString()} 元，優先投入 v5 前 20% 且現金流優先序最高的低估值高息標的。</p>
+          <div class="space-y-1.5 pt-1 tabular-nums">
+            <div class="flex justify-between text-xs"><span class="text-[var(--muted-foreground)]">v5 樣本外夏普值</span><span class="font-medium">2.08 (NW6 t=5.63)</span></div>
+            <div class="w-full h-1.5 rounded-full bg-[var(--secondary)] overflow-hidden"><div class="h-full rounded-full bg-amber-500" style="width:68%"></div></div>
+          </div>
+        </div>
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-[var(--muted-foreground)]">里程碑 03</span>
+            <span class="text-sky-500 font-medium">6 個月紀律扣款</span>
+          </div>
+          <h3 class="text-sm font-semibold">固定扣款 ${DASHBOARD_DATA.coreSymbol.code} 領季配息</h3>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">每月核心 ${coreAmt.toLocaleString()} 元買進約 ${sharesPerMo} 股 ${DASHBOARD_DATA.coreSymbol.code}，持續壓低均價並累積現金流。</p>
+          <div class="space-y-1.5 pt-1 tabular-nums">
+            <div class="flex justify-between text-xs"><span class="text-[var(--muted-foreground)]">現有 ${curShares} 股 / 半年預估 ${sixMoTarget} 股</span><span class="font-medium">${m3Pct}%</span></div>
+            <div class="w-full h-1.5 rounded-full bg-[var(--secondary)] overflow-hidden"><div class="h-full rounded-full bg-sky-500" style="width:${m3Pct}%"></div></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderHoldingsTable() {
+      const { weightByCode } = computePortfolioTotals();
+      const rows = state.holdings.filter(h => {
+        if (state.holdFilter === "ALL") return true;
+        if (state.holdFilter === "SELL") return h.sellList || h.targetSell !== null;
+        return h.mkt === state.holdFilter;
+      });
+      document.getElementById("holdings-tbody").innerHTML = rows.map(h => {
+        const pnlPct = h.cost > 0 ? (h.price - h.cost) / h.cost * 100 : 0;
+        const wt = (weightByCode[h.code] || 0) * 100;
+        const pnlColor = pnlPct >= 0 ? "text-emerald-500" : "text-rose-500";
+        const curr = h.mkt === "US" ? "$" : "";
+        const sharesCell = state.editMode
+          ? `<input type="number" step="any" value="${h.shares}" onchange="updateHoldingField('${h.code}','shares',this.value)" class="w-20 text-right bg-[var(--secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 text-xs" />`
+          : `${h.shares}`;
+        const costCell = state.editMode
+          ? `<input type="number" step="0.01" value="${h.cost}" onchange="updateHoldingField('${h.code}','cost',this.value)" class="w-20 text-right bg-[var(--secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 text-xs" />`
+          : `${curr}${h.cost.toFixed(2)}`;
+        const tgtCell = state.editMode
+          ? `<input type="number" step="0.1" placeholder="無" value="${h.targetSell ?? ''}" onchange="updateHoldingField('${h.code}','targetSell',this.value)" class="w-20 text-right bg-[var(--secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 text-xs" />`
+          : (h.targetSell ? `${curr}${h.targetSell.toFixed(2)}` : "—");
+        const alertTag = (h.targetSell && h.price >= h.targetSell)
+          ? `<span class="text-emerald-500 font-semibold">★ 已達標！</span> `
+          : (wt > 20 && pnlPct > 0 ? `<span class="text-amber-500 font-semibold">★ 超重贏家！</span> ` : "");
+        return `
+          <tr class="hover:bg-[var(--secondary)]/60 transition">
+            <td class="py-3 pr-3"><div class="font-semibold">${h.code} ${h.name}</div><div class="text-xs text-[var(--muted-foreground)]">${h.mkt}</div></td>
+            <td class="py-3 px-2 text-right">${sharesCell}</td>
+            <td class="py-3 px-2 text-right text-[var(--muted-foreground)]">${costCell}</td>
+            <td class="py-3 px-2 text-right font-medium">${curr}${h.price.toFixed(2)}</td>
+            <td class="py-3 px-2 text-right text-[var(--muted-foreground)]">${tgtCell}</td>
+            <td class="py-3 px-2 text-right font-semibold ${pnlColor}">${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%</td>
+            <td class="py-3 px-2 text-right">${wt.toFixed(1)}%</td>
+            <td class="py-3 pl-2 text-xs text-[var(--muted-foreground)]">${alertTag}${h.action}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function selectSatCandidate(code) {
+      state.satCode = code;
+      saveLocalState();
+      renderOrderCalculator();
+      renderScreener();
+    }
+
+    function renderOrderCalculator() {
+      const coreBudget = Math.round(state.monthly * (state.coreRatio / 100));
+      const satBudget = Math.max(0, state.monthly - coreBudget);
+
+      // Core order draft
+      const cSym = DASHBOARD_DATA.coreSymbol;
+      const cShares = cSym.price > 0 ? Math.floor(coreBudget / cSym.price) : 0;
+      const cActual = cShares * cSym.price;
+      const cFee = cShares > 0 ? Math.max(1, Math.round(cActual * 0.001425)) : 0;
+      document.getElementById("ord-core-budget").textContent = `預算 ${coreBudget.toLocaleString()} 元 (${state.coreRatio}%)`;
+      document.getElementById("ord-core-detail").textContent = `買進 ${cSym.code} ${cSym.name} · ${cShares} 股 @ ${cSym.price.toFixed(2)} 元`;
+      document.getElementById("ord-core-sub").textContent = `實際成交約 ${Math.round(cActual).toLocaleString()} 元 ｜ 手續費約 ${cFee} 元 ｜ 餘額 ${Math.max(0, Math.round(coreBudget - cActual - cFee)).toLocaleString()} 元`;
+
+      // Satellite order draft
+      const satItem = DASHBOARD_DATA.screener.find(x => x.code === state.satCode) || DASHBOARD_DATA.screener[0];
+      const sShares = satItem && satItem.price > 0 ? Math.floor(satBudget / satItem.price) : 0;
+      const sActual = satItem ? sShares * satItem.price : 0;
+      const sFee = sShares > 0 ? Math.max(1, Math.round(sActual * 0.001425)) : 0;
+      document.getElementById("ord-sat-budget").textContent = `預算 ${satBudget.toLocaleString()} 元 (${100 - state.coreRatio}%)`;
+      document.getElementById("ord-sat-detail").textContent = satItem
+        ? `買進 ${satItem.code} ${satItem.name} · ${sShares} 股 @ ${satItem.price.toFixed(2)} 元（v5 #${satItem.rank}）`
+        : "請由下方點選標的";
+      document.getElementById("ord-sat-sub").textContent = satItem
+        ? `成交約 ${Math.round(sActual).toLocaleString()} 元 ｜ 手續費約 ${sFee} 元 ｜ 殖利率 ${satItem.yield.toFixed(2)}% ｜ 餘額 ${Math.max(0, Math.round(satBudget - sActual - sFee)).toLocaleString()} 元`
+        : "";
+    }
+
+    function renderScreener() {
+      const { weightByCode } = computePortfolioTotals();
+      const watchSet = new Set(DASHBOARD_DATA.watchCodes);
+      const maxP = parseFloat(document.getElementById("filter-max-price").value);
+      const minY = parseFloat(document.getElementById("filter-min-yield").value);
+      const watchOnly = document.getElementById("filter-watch-only").checked;
+      const filtered = DASHBOARD_DATA.screener.filter(r => {
+        if (watchOnly && !watchSet.has(r.code)) return false;
+        if (!watchOnly && (r.price > maxP || r.yield < minY)) return false;
+        return true;
+      });
+      document.getElementById("screener-tbody").innerHTML = filtered.map(r => {
+        const wNow = weightByCode[r.code] || 0;
+        const prio = r.v5 + 1.0 * (0.10 - wNow) / 0.10;
+        const isSel = r.code === state.satCode;
+        return `
+          <tr class="${isSel ? "bg-emerald-500/10" : "hover:bg-[var(--secondary)]/60"} transition">
+            <td class="py-3 pr-2 font-mono font-semibold text-[var(--muted-foreground)]">#${String(r.rank).padStart(2, "0")}</td>
+            <td class="py-3 px-2 font-semibold">${r.code} ${r.name}${watchSet.has(r.code) ? " ·" : ""}</td>
+            <td class="py-3 px-2 text-xs text-[var(--muted-foreground)]">${r.group}</td>
+            <td class="py-3 px-2 text-right">${r.price.toFixed(2)}</td>
+            <td class="py-3 px-2 text-right font-medium ${r.yield >= 4.5 ? "text-emerald-500" : ""}">${r.yield.toFixed(2)}%</td>
+            <td class="py-3 px-2 text-right text-[var(--muted-foreground)]">${r.per > 0 ? r.per.toFixed(1) : "—"}</td>
+            <td class="py-3 px-2 text-right font-medium">${r.v5 >= 0 ? "+" : ""}${r.v5.toFixed(3)}</td>
+            <td class="py-3 px-2 text-right font-semibold text-sky-500">${prio >= 0 ? "+" : ""}${prio.toFixed(2)}</td>
+            <td class="py-3 pl-2">
+              <button onclick="selectSatCandidate('${r.code}')" class="px-2.5 py-1 rounded-md text-xs font-medium transition ${isSel ? "bg-emerald-500 text-white" : "bg-[var(--secondary)] border border-[var(--border)] hover:border-emerald-500"}">
+                ${isSel ? "已套入買單" : "試算買單"}
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderAudit() {
+      document.getElementById("audit-bars").innerHTML = DASHBOARD_DATA.auditModels.map(m => `
+        <div class="space-y-1.5 tabular-nums">
+          <div class="flex justify-between text-xs">
+            <span class="${m.hl ? "font-semibold" : "text-[var(--muted-foreground)]"}">${m.name}</span>
+            <span class="${m.hl ? "font-semibold text-emerald-500" : "text-[var(--muted-foreground)]"}">+${m.alpha.toFixed(2)}% (t=${m.t}) · 夏普 ${m.sharpe}</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-[var(--secondary)] overflow-hidden">
+            <div class="h-full rounded-full ${m.hl ? "bg-emerald-500" : "bg-sky-500/60"}" style="width: ${(m.alpha / 16 * 100).toFixed(1)}%"></div>
+          </div>
+        </div>
+      `).join("");
+
+      const maxSim = Math.max(...DASHBOARD_DATA.simBench.map(s => s.val)) * 1.06;
+      document.getElementById("sim-bars").innerHTML = DASHBOARD_DATA.simBench.map(s => `
+        <div class="space-y-1 tabular-nums">
+          <div class="flex justify-between text-xs">
+            <span>${s.name}</span>
+            <span class="text-[var(--muted-foreground)] font-medium">${s.val.toLocaleString()} (${s.roi})</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-[var(--secondary)] overflow-hidden">
+            <div class="h-full rounded-full ${s.color}" style="width: ${(s.val / maxSim * 100).toFixed(1)}%"></div>
+          </div>
+        </div>
+      `).join("");
+
+      document.getElementById("audit-tbody").innerHTML = DASHBOARD_DATA.auditModels.map(m => `
+        <tr class="${m.hl ? "bg-[var(--secondary)] font-semibold" : ""}">
+          <td class="py-2.5 pr-3">${m.name}</td>
+          <td class="py-2.5 px-2 text-right ${m.hl ? "text-emerald-500" : ""}">${m.ic.toFixed(4)} (${m.icT.toFixed(2)})</td>
+          <td class="py-2.5 px-2 text-right">+${m.longGross.toFixed(1)}%</td>
+          <td class="py-2.5 px-2 text-right">${m.beta.toFixed(3)}</td>
+          <td class="py-2.5 px-2 text-right ${m.hl ? "text-emerald-500" : ""}">+${m.alpha.toFixed(2)}% (${m.t.toFixed(2)})</td>
+          <td class="py-2.5 px-2 text-right">${m.mdd.toFixed(1)}%</td>
+          <td class="py-2.5 px-2 text-right ${m.hl ? "text-emerald-500" : ""}">${m.sharpe.toFixed(2)}</td>
+          <td class="py-2.5 pl-2 text-right">${m.turn.toFixed(1)}% / ${m.sectors.toFixed(1)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function syncMonthly(raw) {
+      state.monthly = Math.max(0, Number(raw) || 0);
+      document.getElementById("global-monthly").value = raw;
+      document.getElementById("in-monthly").value = raw;
+      document.getElementById("sl-monthly").value = Math.min(30000, Math.max(1000, state.monthly));
+      const core = Math.round(state.monthly * (state.coreRatio / 100));
+      const sat = Math.max(0, state.monthly - core);
+      document.getElementById("global-split-hint").textContent = `核心 ${core.toLocaleString()} · 衛星 ${sat.toLocaleString()}`;
+      saveLocalState();
+      renderMilestones();
+      renderOrderCalculator();
+      updateSimulator();
+    }
+
+    function syncCoreRatio(raw) {
+      state.coreRatio = Math.min(100, Math.max(0, Number(raw) || 0));
+      document.getElementById("in-core-ratio").value = state.coreRatio;
+      const core = Math.round(state.monthly * (state.coreRatio / 100));
+      const sat = Math.max(0, state.monthly - core);
+      document.getElementById("global-split-hint").textContent = `核心 ${core.toLocaleString()} · 衛星 ${sat.toLocaleString()}`;
+      saveLocalState();
+      renderMilestones();
+      renderOrderCalculator();
+    }
+
+    function syncExtra(raw) {
+      state.extra = Math.max(0, Number(raw) || 0);
+      document.getElementById("in-extra").value = raw;
+      document.getElementById("sl-extra").value = Math.min(50, Math.max(0, state.extra));
+      saveLocalState();
+      updateSimulator();
+    }
+
+    function syncRate(raw) {
+      state.rate = Math.max(0, Math.min(30, Number(raw) || 0));
+      document.getElementById("in-rate").value = raw;
+      document.getElementById("sl-rate").value = Math.min(14, Math.max(4, state.rate));
+      saveLocalState();
+      updateSimulator();
+    }
+
+    function applyPreset(extra, monthly, rate) {
+      syncExtra(extra);
+      syncMonthly(monthly);
+      syncRate(rate);
+    }
+
+    function updateSimulator() {
+      const { totalMv, totalCost } = computePortfolioTotals();
+      const extraWan = state.extra;
+      const monthly = state.monthly;
+      const ratePct = state.rate;
+      const r = ratePct / 100;
+
+      const startVal = totalMv + extraWan * 10000;
+      const startCost = totalCost + extraWan * 10000;
+      const annualContrib = monthly * 12;
+      const divYield = ratePct <= 9 ? 0.06 : 0.042;
+
+      const years = [];
+      let val = startVal, cost = startCost;
+      let millionYr = val >= 1000000 ? 0 : null;
+      let crossYr = null;
+
+      years.push({ y: 0, label: "現在", val, cost });
+      for (let y = 1; y <= 10; y++) {
+        val = val * (1 + r) + annualContrib * (1 + r * 0.5);
+        cost += annualContrib;
+        if (millionYr === null && val >= 1000000) millionYr = y;
+        if (crossYr === null && annualContrib > 0 && val * divYield >= annualContrib) crossYr = y;
+        years.push({ y, label: `Y${y}`, val, cost });
+      }
+
+      const y5 = years[5], y10 = years[10];
+      const monthlyDiv10 = (y10.val * divYield) / 12;
+
+      document.getElementById("kpi-y5").textContent = `${(y5.val / 10000).toFixed(1)} 萬`;
+      document.getElementById("kpi-y10").textContent = `${(y10.val / 10000).toFixed(1)} 萬`;
+      document.getElementById("kpi-profit").textContent = `+${((y10.val - y10.cost) / 10000).toFixed(1)} 萬`;
+      document.getElementById("kpi-div").textContent = `${Math.round(monthlyDiv10).toLocaleString()} 元`;
+
+      const mMsg = millionYr !== null ? `將於第 ${millionYr} 年突破 100 萬第一桶金` : `10 年內達 ${(y10.val / 10000).toFixed(1)} 萬元`;
+      const cMsg = crossYr !== null ? `第 ${crossYr} 年起全年股息超越全年自存本金` : `第 10 年股息約覆蓋 ${annualContrib > 0 ? Math.round((y10.val * divYield / annualContrib) * 100) : 0}% 存額`;
+      document.getElementById("sim-feedback").textContent = `即時試算：起點 ${(startVal/10000).toFixed(1)} 萬、每月投入 ${monthly.toLocaleString()} 元、年化 ${ratePct.toFixed(1)}% ➔ ${mMsg}；${cMsg}。`;
+
+      const svg = document.getElementById("sim-svg");
+      const maxVal = Math.max(100000, ...years.map(d => d.val)) * 1.15;
+      const padL = 48, padR = 16, padT = 22, padB = 30;
+      const W = 760, H = 270, plotW = W - padL - padR, plotH = H - padT - padB;
+      const step = plotW / years.length;
+
+      let out = "";
+      for (let g = 0; g <= 4; g++) {
+        const yPos = padT + plotH * (1 - g / 4);
+        out += `<line x1="${padL}" y1="${yPos}" x2="${W - padR}" y2="${yPos}" stroke="currentColor" stroke-opacity="0.1" />`;
+        out += `<text x="${padL - 8}" y="${yPos + 4}" text-anchor="end" font-size="12" fill="currentColor" opacity="0.55">${Math.round((maxVal * g / 4) / 10000)}萬</text>`;
+      }
+      if (1000000 <= maxVal) {
+        const y100 = padT + plotH * (1 - 1000000 / maxVal);
+        out += `<line x1="${padL}" y1="${y100}" x2="${W - padR}" y2="${y100}" stroke="#f59e0b" stroke-dasharray="4,4" stroke-width="1.5" />`;
+        out += `<text x="${W - padR}" y="${y100 - 6}" text-anchor="end" font-size="12" fill="#f59e0b" font-weight="600">100萬</text>`;
+      }
+      years.forEach((d, idx) => {
+        const cx = padL + idx * step + step / 2;
+        const bw = Math.min(18, step * 0.32);
+        const hCost = (d.cost / maxVal) * plotH;
+        const hVal = (d.val / maxVal) * plotH;
+        out += `<rect x="${cx - bw - 1}" y="${padT + plotH - hCost}" width="${bw}" height="${hCost}" rx="4" fill="#94a3b8" opacity="0.55" />`;
+        out += `<rect x="${cx + 1}" y="${padT + plotH - hVal}" width="${bw}" height="${hVal}" rx="4" fill="#10b981" />`;
+        out += `<text x="${cx}" y="${padT + plotH - hVal - 6}" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.8">${(d.val / 10000).toFixed(0)}</text>`;
+        out += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.6">${d.label}</text>`;
+      });
+      svg.innerHTML = out;
+    }
+
+    function renderAllLive() {
+      renderHeaderKPIs();
+      renderMilestones();
+      renderHoldingsTable();
+      renderOrderCalculator();
+      renderScreener();
+      renderAudit();
+      updateSimulator();
+    }
+
+    function initUI() {
+      setTheme(state.theme);
+      document.getElementById("global-monthly").value = state.monthly;
+      document.getElementById("in-monthly").value = state.monthly;
+      document.getElementById("sl-monthly").value = Math.min(30000, Math.max(1000, state.monthly));
+      document.getElementById("in-extra").value = state.extra;
+      document.getElementById("sl-extra").value = Math.min(50, Math.max(0, state.extra));
+      document.getElementById("in-rate").value = state.rate;
+      document.getElementById("sl-rate").value = Math.min(14, Math.max(4, state.rate));
+      document.getElementById("in-core-ratio").value = state.coreRatio;
+      const core = Math.round(state.monthly * (state.coreRatio / 100));
+      document.getElementById("global-split-hint").textContent = `核心 ${core.toLocaleString()} · 衛星 ${Math.max(0, state.monthly - core).toLocaleString()}`;
+      filterHoldings(state.holdFilter);
+      renderAllLive();
+    }
+
+    loadLocalState();
+    initUI();
+  </script>
+</body>
+</html>

@@ -12,6 +12,7 @@ An open-source **Antigravity Agent Skill** & Python quantitative research engine
 - **`skills/tw-quant-factor-v5/scripts/`**:
   - `backtest_v5.py`: Point-in-time v5 multi-factor engine (Residual Momentum + Full-Group Industry Momentum + Monthly Revenue Momentum + 8%-Capped Cyclical-Normalized Industry-Neutral Value), 4-cohort staggered evaluation, true weekly mark-to-market MDD, and retail odd-lot cash-flow simulator.
   - `monitor_portfolio.py`: Generic CLI monitor that reads a local JSON portfolio file and outputs v5 rankings, cash-flow rebalancing priorities, and overweight winner-trim alerts.
+  - `generate_dashboard.py`: Generates a self-contained Light/Dark interactive HTML workbench (`resources/dashboard_template.html`) with `localStorage` persistence, editable holdings, a monthly Core+Satellite odd-lot order calculator, and a 10-year compounding simulator.
   - `score_predictions.py`: Probabilistic forecast tracker and Brier Score evaluator.
   - `tests/`: 29 pytest unit tests validating factor math, caps, causality, and zero-realized-loss invariants.
 
@@ -40,6 +41,9 @@ python3 -m venv .venv
 # Copy template to a local gitignored file and run weekly monitor
 cp skills/tw-quant-factor-v5/references/portfolio-template.json ./my_portfolio.json
 .venv/bin/python skills/tw-quant-factor-v5/scripts/monitor_portfolio.py --portfolio ./my_portfolio.json
+
+# Generate interactive Light/Dark HTML dashboard
+.venv/bin/python skills/tw-quant-factor-v5/scripts/generate_dashboard.py --portfolio ./my_portfolio.json --output ./v5_dashboard.html
 ```
 
 ## License

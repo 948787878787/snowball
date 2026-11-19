@@ -61,5 +61,12 @@ Executes 4-cohort staggered Jegadeesh-Titman evaluation, true weekly mark-to-mar
    - **Satellite (40%–45% of monthly inflow)**: Deploy into the Top-20% v5 candidate (price suitable for odd lots) with the highest cash-flow priority `Priority = S_v5 + (w_target - w_now) / w_target`.
    - **Freeze Losers / Trim Overweight Winners Only**: Do not add to stocks falling outside Top 40%; trim profitable holdings (`Price > AvgCost`) only when weight exceeds `2 × w_target` (`20%`) or reaches a user-defined profit target.
 
-### 4. Score Weekly Probabilistic Forecasts
+### 4. Generate Interactive Light/Dark HTML Workbench
+Build a self-contained HTML dashboard (with Light/Dark/System themes, `localStorage` persistence, inline editable holdings, a Core+Satellite odd-lot order calculator, and an interactive 10-year compounding simulator):
+
+```bash
+.venv/bin/python skills/tw-quant-factor-v5/scripts/generate_dashboard.py --portfolio ./my_portfolio.json --output ./v5_dashboard.html
+```
+
+### 5. Score Weekly Probabilistic Forecasts
 If tracking directional predictions in a CSV log, run [score_predictions.py](./scripts/score_predictions.py) to compute hit rates and Brier Scores (`BS = mean((p - o)^2)`).

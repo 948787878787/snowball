@@ -54,3 +54,13 @@ def test_zero_realized_loss_simulator_respects_invariants():
     assert res["Contributed_TWD"] == 10000.0 * 5
     assert res["Terminal_TWD"] > 0
     assert res["Winner_Trims"] >= 1
+
+
+def test_dashboard_template_and_injection():
+    import generate_dashboard as gd
+
+    assert gd.TEMPLATE_HTML.exists()
+    html = gd.TEMPLATE_HTML.read_text(encoding="utf-8")
+    out = gd.inject_data(html, {"title": "Test Dashboard", "defaultMonthly": 12000})
+    assert '"defaultMonthly": 12000' in out
+    assert "/*__DATA_START__*/" in out
