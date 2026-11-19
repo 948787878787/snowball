@@ -42,6 +42,7 @@ Usage:
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -495,6 +496,7 @@ def score_latest_global(
     groups: dict,
     model: str = "v6",
     macro_regime: Optional[dict] = None,
+    learned_weights: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Score latest global cross-section using v6 (Macro-Micro 6-pillar) or v5 (4-pillar) formula."""
     dt = price_factors["f_res_mom"].index[-1]
@@ -584,8 +586,12 @@ def score_latest_global(
     else:
         f_fin = z_rev
 
-    # Macroeconomic Regime-Conditioned Weights (strictly bounded, sums to 1.00)
-    if macro_regime is not None:
+    # Pillar Weights: Learned Kaggle/Walk-Forward weights > Macro Regime-Conditioned > Static Baseline
+    if learned_weights is not None:
+        w = {k: float(learned_weights.get(k, BASELINE_V6_WEIGHTS[k])) for k in BASELINE_V6_WEIGHTS}
+        s_w = sum(w.values())
+        w = {k: v / s_w for k, v in w.items()} if s_w > 0 else BASELINE_V6_WEIGHTS
+    elif macro_regime is not None:
         w = regime_conditioned_weights(
             macro_regime.get("macro_stress", 0.0),
             macro_regime.get("rate_inflation", 0.0),
@@ -864,6 +870,17 @@ def load_membership_csv(path: Path) -> pd.DataFrame:
     return df.astype(bool)
 
 
+def load_learned_weights(path: Path) -> dict:
+    """Load portable `v6_learned_weights.json` exported by `train_walkforward.py` / Kaggle."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    raw = data.get("weights", data)
+    weights = {k: float(raw.get(k, BASELINE_V6_WEIGHTS[k])) for k in BASELINE_V6_WEIGHTS}
+    tot = sum(weights.values())
+    if tot <= 0:
+        return dict(BASELINE_V6_WEIGHTS)
+    return {k: v / tot for k, v in weights.items()}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Snowball Global Equity Multi-Factor Ranker & Backtester (v6/v5)")
     parser.add_argument("--market", default="", help=f"Market preset ({', '.join(list_markets())}; defaults to GLOBAL if omitted without --universe-file)")
@@ -877,6 +894,7 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=20, help="Number of top-ranked stocks to display")
     parser.add_argument("--skip-fundamentals", action="store_true", help="Skip per-ticker Yahoo fundamental fetch (faster for 250+ tickers)")
     parser.add_argument("--no-macro", action="store_true", help="Disable macroeconomic regime conditioning (use static baseline v6 weights)")
+    parser.add_argument("--learned-weights", type=Path, default=None, help="Optional v6_learned_weights.json exported from Kaggle/Walk-Forward training")
     parser.add_argument("--backtest", action="store_true", help="Also run 4-cohort staggered historical backtest (Next-Day Open execution)")
     parser.add_argument("--offline-demo", action="store_true", help="Run on synthetic data without network")
     args = parser.parse_args()
@@ -909,10 +927,15 @@ def main() -> None:
     pf = compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
     macro_panel = compute_macro_regime_panel(macro_d, pf["close_w"].index)
     latest_macro = macro_panel.iloc[-1].to_dict() if not macro_panel.empty else None
+    learned_w = load_learned_weights(args.learned_weights) if args.learned_weights else None
     active_weights = (
-        regime_conditioned_weights(latest_macro["macro_stress"], latest_macro["rate_inflation"])
-        if (latest_macro is not None and not args.no_macro)
-        else BASELINE_V6_WEIGHTS
+        learned_w
+        if learned_w is not None
+        else (
+            regime_conditioned_weights(latest_macro["macro_stress"], latest_macro["rate_inflation"])
+            if (latest_macro is not None and not args.no_macro)
+            else BASELINE_V6_WEIGHTS
+        )
     )
     ranked = score_latest_global(
         pf,
@@ -920,6 +943,7 @@ def main() -> None:
         groups,
         model=args.model,
         macro_regime=None if args.no_macro else latest_macro,
+        learned_weights=learned_w,
     )
 
     pd.set_option("display.width", 260)

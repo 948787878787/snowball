@@ -98,3 +98,12 @@ Includes FinMind monthly revenue (lagged to the 11th), 5-year rolling median cyc
 ```bash
 .venv/bin/python skills/snowball/scripts/score_predictions.py --csv ./my_predictions.csv
 ```
+
+### 6. Train Combined US + TW (2,000-Stock) Model (Local or Kaggle GPU/CPU)
+Build a strictly leak-free Point-in-Time multi-market panel (Next-Day Open labels + lagged macro regime + optional PIT fundamentals) and run Purged Expanding Walk-Forward training (`baseline_v6_prior` vs `stage1_icir_shrinkage` vs `stage2_ridge` vs `stage3_lgbm`):
+```bash
+.venv/bin/python skills/snowball/scripts/build_training_panel.py --markets US,TW --period 8y --output ./kaggle_dataset/snowball_us_tw_2000.parquet
+.venv/bin/python skills/snowball/scripts/train_walkforward.py --panel ./kaggle_dataset/snowball_us_tw_2000.parquet --output-dir ./snowball_artifacts
+.venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --learned-weights ./snowball_artifacts/v6_learned_weights.json --top 20
+```
+Ready-to-upload Kaggle notebook: `notebooks/snowball_kaggle_train.ipynb`.
