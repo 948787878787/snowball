@@ -1,0 +1,17 @@
+# Python & virtual environments
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Cached market data & local backtest outputs
+cache/
+results/
+*.pkl
+
+# Personal portfolio files & private logs (NEVER commit!)
+my_portfolio.json
+portfolio.json
+預測紀錄.csv
+*.local.json
+.DS_Store

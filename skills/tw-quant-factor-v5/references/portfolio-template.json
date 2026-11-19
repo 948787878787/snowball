@@ -1,0 +1,43 @@
+{
+  "currency_fx_usd_twd": 32.5,
+  "satellite_target_weight": 0.10,
+  "max_odd_lot_price": 500.0,
+  "holdings": [
+    {
+      "market": "TW",
+      "code": "0056",
+      "symbol": "0056.TW",
+      "name": "Example High-Dividend ETF",
+      "shares": 100,
+      "cost": 40.0,
+      "role": "core_dca"
+    },
+    {
+      "market": "TW",
+      "code": "2886",
+      "symbol": "2886.TW",
+      "name": "Example Commercial Bank",
+      "shares": 100,
+      "cost": 45.0,
+      "target_sell": 55.0,
+      "role": "satellite"
+    }
+  ],
+  "watchlist": [
+    {
+      "code": "5880",
+      "name": "Taiwan Cooperative FHC",
+      "note": "Commercial bank dividend candidate"
+    },
+    {
+      "code": "3702",
+      "name": "WPG Holdings",
+      "note": "Semiconductor distribution candidate"
+    },
+    {
+      "code": "2347",
+      "name": "Synnex Technology",
+      "note": "IT distribution candidate"
+    }
+  ]
+}
