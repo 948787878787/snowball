@@ -2,18 +2,32 @@
 
 > **Language / 語言**：[English](./README.md) | **繁體中文**
 
-**Snowball** 是一個專為**所有主流 AI 代理人（All-Agents Skill）**設計的開源台股量化研究套件，整合 **v5 多因子實證選股引擎**、**點對點（Point-in-Time）防偷看回測框架**，以及適合散戶零股的 **「只買不賣現金流再平衡＋超重贏家減碼」** 交易規則與互動式深淺色 HTML 工作台。
+**Snowball** 是一個專為**所有主流 AI 代理人（All-Agents Skill）**設計的開源**全球股市**量化研究套件，整合 **v5 多因子實證選股引擎**、**點對點（Point-in-Time）防偷看回測框架**，以及適合散戶零股的 **「只買不賣現金流再平衡＋超重贏家減碼」** 交易規則與互動式深淺色 HTML 工作台。
 
-原生相容於 **Antigravity (AGY)**、**Claude Code**、**OpenAI Codex CLI**、**Cursor**、**Windsurf**、**Cline** 與 **OpenCode**。
+支援 **美股（US）、歐股（EU）、日股（JP）、港股（HK）、台股（TW）、跨區全球龍頭（GLOBAL）** 以及任意自訂全球股票代碼，並原生相容於 **Antigravity (AGY)**、**Claude Code**、**OpenAI Codex CLI**、**Cursor**、**Windsurf**、**Cline** 與 **OpenCode**。
 
 > **免責聲明**：本專案僅供量化金融實證研究、回測方法論教學與個人紀律追蹤使用，不構成任何持牌投資建議，所有買賣與部位決策請自行負責。
+
+---
+
+## 支援的全球股市範圍
+
+| 市場參數 | 涵蓋交易所與標的池 | 基準指數 | 交易成本模型 |
+|---|---|---|---|
+| `--market US` | 美股 10 大產業 40 檔核心藍籌（NYSE / NASDAQ） | `SPY` | `0.10%` |
+| `--market EU` | 歐洲 18 檔龍頭（Euronext / XETRA / LSE / SIX） | `^STOXX50E` | `0.30%` |
+| `--market JP` | 日本 16 檔東證權值藍籌（`.T`） | `^N225` | `0.20%` |
+| `--market HK` | 香港 12 檔恒生核心權值（`.HK`） | `^HSI` | `0.45%`（含印花稅） |
+| `--market TW` | 台股 20 大同業組 84 檔（上市／上櫃） | `^TWII` | `0.585%` |
+| `--market GLOBAL` | 跨區全球旗艦組合（美／歐／日／港／台） | `ACWI` | `0.30%` |
+| `--tickers ...` | 任意自訂全球 Yahoo Finance 股票代碼 | 自訂（預設 `ACWI`） | `0.20%` |
 
 ---
 
 ## 核心特色
 
 - **跨平台 All-Agents Skill（`skills/snowball/SKILL.md`）**：採用開放的 `SKILL.md` 漸進式揭露（Progressive Disclosure）結構，讓不同 AI 助理皆可自動發現、閱讀參考文件並執行標準化指令。
-- **v5 實證多因子選股公式（`backtest_v5.py`）**：
+- **全球通用 v5 實證多因子選股公式（`global_ranker.py` 與 `backtest_v5.py`）**：
   - **殘差動能（`F_ResMom_26_4w`）**：過去 26 週跳過近 4 週的 Beta 調整累積超額報酬（Blitz et al., 2011），去除隱性 Beta 並降低動能崩盤風險。
   - **全組產業動能（`F_IndMom_Full_12w`）**：過去 12 週同業全組平均 alpha（Moskowitz & Grinblatt, 1999），修正小組排除自己造成之 `-1/(G-1)` 機械性反轉漏洞。
   - **點對點月營收動能（`F_FinStmt`）**：近 3 個月營收年增率（YoY）與 3 個月加速度各占 50%，嚴格於次月 11 日才視為市場公開。
@@ -72,10 +86,15 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. 執行離線單元測試（共 32 項測試）
+# 2. 執行離線單元測試（共 35 項測試）
 .venv/bin/pytest skills/snowball/scripts
 
-# 3. 執行完整 v5 點對點回測（自動抓取 Yahoo Finance 與 FinMind 並快取於本地 cache/）
+# 3. 排序與回測全球任意股市（US / EU / JP / HK / TW / GLOBAL / 自訂代碼）
+.venv/bin/python skills/snowball/scripts/global_ranker.py --market US --backtest
+.venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --backtest
+.venv/bin/python skills/snowball/scripts/global_ranker.py --tickers AAPL,MSFT,GOOGL,ASML.AS,7203.T,2330.TW --benchmark ACWI
+
+# 4. 執行台股深度回測（整合 FinMind 點對點月營收與零股現金流模擬器）
 .venv/bin/python skills/snowball/scripts/backtest_v5.py
 
 # 4. 複製零個資持股模板（已列入 .gitignore，絕不會上傳個人資料）並執行每週監控

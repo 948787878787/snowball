@@ -2,7 +2,7 @@
 
 > **Language / 語言**: **English** | [繁體中文](./README.zh-TW.md)
 
-An open-source **All-Agents Skill** & Python quantitative research workbench for **Taiwan equity multi-factor ranking (v5)**, **point-in-time backtesting**, and **buy-only retail cash-flow rebalancing**.
+An open-source **All-Agents Skill** & Python quantitative research workbench for **global equity multi-factor ranking (v5)**, **point-in-time backtesting**, and **buy-only retail cash-flow rebalancing** — covering **US, Europe, Japan, Hong Kong, Taiwan, and custom global tickers**.
 
 Designed to work seamlessly across **Antigravity (AGY)**, **Claude Code**, **OpenAI Codex CLI**, **Cursor**, **Windsurf**, **Cline**, and **OpenCode**.
 
@@ -10,10 +10,24 @@ Designed to work seamlessly across **Antigravity (AGY)**, **Claude Code**, **Ope
 
 ---
 
+## Global Market Coverage
+
+| Market Flag | Exchanges / Scope | Benchmark | Cost Model |
+|---|---|---|---|
+| `--market US` | 40 US blue chips across 10 sectors (NYSE / NASDAQ) | `SPY` | `0.10%` |
+| `--market EU` | 18 European leaders (Euronext / XETRA / LSE / SIX) | `^STOXX50E` | `0.30%` |
+| `--market JP` | 16 Japan leaders (Tokyo Stock Exchange `.T`) | `^N225` | `0.20%` |
+| `--market HK` | 12 Hong Kong leaders (HKEX `.HK`) | `^HSI` | `0.45%` |
+| `--market TW` | 84 Taiwan stocks across 20 peer groups (TWSE / TPEx) | `^TWII` | `0.585%` |
+| `--market GLOBAL` | Cross-region flagship universe (US + EU + JP + HK + TW) | `ACWI` | `0.30%` |
+| `--tickers ...` | Any custom Yahoo Finance tickers worldwide | Custom (`ACWI`) | `0.20%` |
+
+---
+
 ## Features
 
 - **Universal Agent Skill (`skills/snowball/SKILL.md`)**: Follows the open `SKILL.md` progressive-disclosure standard so any AI coding agent can discover and execute the workflow automatically.
-- **v5 Multi-Factor Ranking Engine (`backtest_v5.py`)**:
+- **Global v5 Multi-Factor Engine (`global_ranker.py` & `backtest_v5.py`)**:
   - **Residual Momentum (`F_ResMom_26_4w`)**: 26-week skipping last 4-week Beta-adjusted alpha (Blitz et al. 2011).
   - **Full-Group Industry Momentum (`F_IndMom_Full_12w`)**: 12-week peer-group mean alpha without small-group leave-one-out reversal bias (Moskowitz & Grinblatt 1999).
   - **Point-in-Time Revenue Momentum (`F_FinStmt`)**: Trailing 3-month revenue YoY + 3-month acceleration lagged strictly to the 11th of the following month.
@@ -72,10 +86,15 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. Run offline unit test suite (32 tests)
+# 2. Run offline unit test suite (35 tests)
 .venv/bin/pytest skills/snowball/scripts
 
-# 3. Run full v5 point-in-time backtest (downloads Yahoo Finance + FinMind data into local cache/)
+# 3. Rank & backtest ANY global market (US / EU / JP / HK / TW / GLOBAL / custom tickers)
+.venv/bin/python skills/snowball/scripts/global_ranker.py --market US --backtest
+.venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --backtest
+.venv/bin/python skills/snowball/scripts/global_ranker.py --tickers AAPL,MSFT,GOOGL,ASML.AS,7203.T,2330.TW --benchmark ACWI
+
+# 4. Run full Taiwan point-in-time backtest with FinMind monthly revenue & odd-lot simulator
 .venv/bin/python skills/snowball/scripts/backtest_v5.py
 
 # 4. Copy zero-PII portfolio template (gitignored) & run weekly monitor

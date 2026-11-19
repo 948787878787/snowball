@@ -1,43 +1,97 @@
 {
+  "base_currency": "USD",
+  "fx_rates_to_base": {
+    "USD": 1.0,
+    "TWD": 0.0308,
+    "EUR": 1.08,
+    "JPY": 0.0065,
+    "HKD": 0.128,
+    "GBP": 1.27
+  },
   "currency_fx_usd_twd": 32.5,
+  "monthly_inflow_twd": 10000,
+  "core_ratio_pct": 60,
   "satellite_target_weight": 0.10,
   "max_odd_lot_price": 500.0,
   "holdings": [
     {
-      "market": "TW",
-      "code": "0056",
-      "symbol": "0056.TW",
-      "name": "Example High-Dividend ETF",
-      "shares": 100,
-      "cost": 40.0,
-      "role": "core_dca"
+      "market": "US",
+      "code": "VT",
+      "symbol": "VT",
+      "name": "Vanguard Total World Stock ETF",
+      "currency": "USD",
+      "shares": 10,
+      "cost": 115.0,
+      "fallback_price": 120.0,
+      "role": "core_dca",
+      "note": "Global core ETF monthly DCA"
+    },
+    {
+      "market": "US",
+      "code": "GOOGL",
+      "symbol": "GOOGL",
+      "name": "Alphabet Inc.",
+      "currency": "USD",
+      "shares": 2,
+      "cost": 250.0,
+      "fallback_price": 280.0,
+      "role": "satellite",
+      "note": "US mega-cap growth satellite"
     },
     {
       "market": "TW",
-      "code": "2886",
-      "symbol": "2886.TW",
-      "name": "Example Commercial Bank",
+      "code": "0056",
+      "symbol": "0056.TW",
+      "name": "Yuanta Taiwan High Dividend ETF",
+      "currency": "TWD",
       "shares": 100,
-      "cost": 45.0,
-      "target_sell": 55.0,
-      "role": "satellite"
+      "cost": 40.0,
+      "fallback_price": 42.0,
+      "role": "core_dca",
+      "note": "Taiwan high-dividend cash-flow core"
+    },
+    {
+      "market": "JP",
+      "code": "8306.T",
+      "symbol": "8306.T",
+      "name": "Mitsubishi UFJ Financial Group",
+      "currency": "JPY",
+      "shares": 100,
+      "cost": 1600.0,
+      "fallback_price": 1750.0,
+      "target_sell": 2200.0,
+      "role": "satellite",
+      "note": "Japan commercial bank value satellite"
     }
   ],
   "watchlist": [
     {
       "code": "5880",
-      "name": "Taiwan Cooperative FHC",
-      "note": "Commercial bank dividend candidate"
+      "name": "Taiwan Cooperative FHC (TW)",
+      "fallback_price": 27.5,
+      "fallback_yield": 3.82,
+      "fallback_per": 18.0
     },
     {
       "code": "3702",
-      "name": "WPG Holdings",
-      "note": "Semiconductor distribution candidate"
+      "name": "WPG Holdings (TW)",
+      "fallback_price": 81.5,
+      "fallback_yield": 4.47,
+      "fallback_per": 5.2
     },
     {
-      "code": "2347",
-      "name": "Synnex Technology",
-      "note": "IT distribution candidate"
+      "code": "JPM",
+      "name": "JPMorgan Chase (US)",
+      "fallback_price": 240.0,
+      "fallback_yield": 2.2,
+      "fallback_per": 13.5
+    },
+    {
+      "code": "ASML.AS",
+      "name": "ASML Holding (EU)",
+      "fallback_price": 720.0,
+      "fallback_yield": 1.0,
+      "fallback_per": 32.0
     }
   ]
 }
