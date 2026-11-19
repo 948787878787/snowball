@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. 執行離線單元測試（共 50 項測試）
+# 2. 執行離線單元測試（共 52 項測試）
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. 排序與回測全球任意股市（US / EU / JP / HK / TW / GLOBAL / 自訂代碼）
@@ -110,10 +110,11 @@ python3 -m venv .venv
 .venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --backtest
 .venv/bin/python skills/snowball/scripts/global_ranker.py --tickers AAPL,MSFT,GOOGL,ASML.AS,7203.T,2330.TW --benchmark ACWI
 
-# 4. 建立美股+台股合併 2,000 檔訓練面板 & 執行 Purged Walk-Forward（本地或 Kaggle GPU/CPU）
+# 4. 建立美股+台股合併 2,000 檔訓練面板 + 免費 SEC EDGAR / TWSE 歷史公告日財報 & 訓練（本地或 Kaggle GPU/CPU）
 .venv/bin/python skills/snowball/scripts/build_training_panel.py --markets US,TW --period 8y --output ./kaggle_dataset/snowball_us_tw_2000.parquet
-.venv/bin/python skills/snowball/scripts/train_walkforward.py --panel ./kaggle_dataset/snowball_us_tw_2000.parquet --output-dir ./snowball_artifacts
-# 將 Kaggle 訓練好的權重載回即時排序引擎：
+.venv/bin/python skills/snowball/scripts/fetch_pit_fundamentals.py --panel ./kaggle_dataset/snowball_us_tw_2000.parquet --out-panel ./kaggle_dataset/snowball_us_tw_2000_pit.parquet
+.venv/bin/python skills/snowball/scripts/train_walkforward.py --panel ./kaggle_dataset/snowball_us_tw_2000_pit.parquet --output-dir ./snowball_artifacts
+# 將訓練好的權重載回即時排序引擎：
 .venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --learned-weights ./snowball_artifacts/v6_learned_weights.json --top 20
 # 也可直接將 notebooks/snowball_kaggle_train.ipynb 上傳至 Kaggle 按 Save & Run All 執行！
 

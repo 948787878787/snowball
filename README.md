@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. Run offline unit test suite (50 tests)
+# 2. Run offline unit test suite (52 tests)
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. Rank & backtest ANY global market (US / EU / JP / HK / TW / GLOBAL / custom tickers)
@@ -110,10 +110,11 @@ python3 -m venv .venv
 .venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --backtest
 .venv/bin/python skills/snowball/scripts/global_ranker.py --tickers AAPL,MSFT,GOOGL,ASML.AS,7203.T,2330.TW --benchmark ACWI
 
-# 4. Build US+TW (2,000-stock) Point-in-Time Training Panel & Run Purged Walk-Forward (Local or Kaggle)
+# 4. Build US+TW (2,000-stock) Point-in-Time Training Panel + SEC EDGAR / TWSE PIT Fundamentals & Train (Local or Kaggle)
 .venv/bin/python skills/snowball/scripts/build_training_panel.py --markets US,TW --period 8y --output ./kaggle_dataset/snowball_us_tw_2000.parquet
-.venv/bin/python skills/snowball/scripts/train_walkforward.py --panel ./kaggle_dataset/snowball_us_tw_2000.parquet --output-dir ./snowball_artifacts
-# Apply Kaggle-trained weights back to live ranking:
+.venv/bin/python skills/snowball/scripts/fetch_pit_fundamentals.py --panel ./kaggle_dataset/snowball_us_tw_2000.parquet --out-panel ./kaggle_dataset/snowball_us_tw_2000_pit.parquet
+.venv/bin/python skills/snowball/scripts/train_walkforward.py --panel ./kaggle_dataset/snowball_us_tw_2000_pit.parquet --output-dir ./snowball_artifacts
+# Apply Kaggle/Walk-Forward trained weights back to live ranking:
 .venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --learned-weights ./snowball_artifacts/v6_learned_weights.json --top 20
 # Or upload notebooks/snowball_kaggle_train.ipynb directly to Kaggle (GPU/CPU) and click Save & Run All!
 

@@ -36,6 +36,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 from scipy.stats import spearmanr
 
 SCRIPT_DIR = Path(__file__).parent
@@ -60,11 +61,44 @@ PILLAR_PRIOR_WEIGHTS: Dict[str, float] = {
     "f_rev_1w": 0.10,
 }
 
-# Mapping from price-only trained pillar weights back into full 6-pillar v6 weights (preserving valuation/quality/fund budget)
+# Mapping from trained feature/pillar signals back into full 6-pillar Snowball v6 weights
 PRICE_TO_V6_MAP: Dict[str, str] = {
     "f_mom_qual": "mom_qual",
     "f_ind_mom": "ind_mom",
     "f_low_risk": "low_risk",
+}
+
+PIT_TO_V6_MAP: Dict[str, Tuple[str, ...]] = {
+    "norm_val": ("pit_ep_z",),
+    "quality": ("pit_roe_z", "pit_gross_margin_chg_z", "pit_fcf_margin_z"),
+    "fund": ("pit_rule40_z", "pit_rev_yoy_z"),
+}
+
+# Date-constant macro series are identical for every stock on date t; including them un-interacted
+# in cross-sectional ML models injects pure time-series noise & excess turnover. Keep only their
+# cross-sectional interactions (`ix_stress_x_lowrisk`, `ix_stress_x_mom`).
+DROP_RAW_MACRO_COLS = frozenset({"macro_stress", "rate_inflation"})
+
+# Economic Theory Sign Constraints (prevents lottery/high-volatility overfitting & survivorship traps):
+#   +1 => coefficient >= 0 (L-BFGS-B bound (0, None); LightGBM monotone_constraint = +1)
+#   -1 => coefficient <= 0 (L-BFGS-B bound (None, 0); LightGBM monotone_constraint = -1)
+#    0 => unconstrained
+THEORY_SIGN_CONSTRAINTS: Dict[str, int] = {
+    "f_mom_qual": +1,
+    "f_res_mom_vol": +1,
+    "f_fip": +1,
+    "f_ind_mom": +1,
+    "f_low_risk": +1,
+    "f_rev_1w": +1,
+    "f_vol_60d": -1,           # Strictly forbid chasing high volatility / lottery stocks
+    "ix_stress_x_lowrisk": +1, # Macro stress reinforces defensive low-risk
+    "ix_stress_x_mom": -1,     # Macro stress dampens momentum crash exposure
+    "pit_rule40_z": +1,        # Sequoia Rule of 40 (RevYoY + FCF Margin)
+    "pit_rev_yoy_z": +1,       # Revenue growth
+    "pit_gross_margin_chg_z": +1,  # Microeconomic Lerner pricing power / margin expansion
+    "pit_roe_z": +1,           # Profitability / ROE
+    "pit_ep_z": +1,            # Earnings yield (Value)
+    "pit_fcf_margin_z": +1,    # Free cash flow margin
 }
 
 
@@ -77,8 +111,8 @@ def _has_lightgbm() -> bool:
 
 
 def detect_feature_columns(panel: pd.DataFrame) -> List[str]:
-    """Return available numeric feature columns (core price/macro + any present PIT fundamentals)."""
-    candidates = list(CORE_FEATURE_COLS) + list(PIT_FUNDAMENTAL_COLS)
+    """Return cross-sectional ML feature columns (drops raw date-constant macro columns)."""
+    candidates = [c for c in CORE_FEATURE_COLS if c not in DROP_RAW_MACRO_COLS] + list(PIT_FUNDAMENTAL_COLS)
     return [c for c in candidates if c in panel.columns and panel[c].notna().any()]
 
 
@@ -139,19 +173,46 @@ def _fit_ridge(
     X: np.ndarray,
     y: np.ndarray,
     l2_alpha: float = 500.0,
+    feature_names: Optional[Sequence[str]] = None,
 ) -> Tuple[float, np.ndarray]:
-    """Exact closed-form standardized L2-regularized Ridge regression (pure NumPy, fast & stable)."""
-    # Replace NaNs with 0 (features are already cross-sectional z-scores centered at 0)
+    """Theory-sign-constrained L2-regularized Ridge regression (prevents high-vol lottery chasing).
+
+    When `feature_names` is provided, enforces `THEORY_SIGN_CONSTRAINTS` via exact-gradient L-BFGS-B
+    so the linear model cannot short `f_low_risk` or bet on `f_vol_60d` during bull-market survivorship windows.
+    """
     Xf = np.nan_to_num(X, nan=0.0, posinf=3.0, neginf=-3.0).astype(np.float64)
     yf = y.astype(np.float64)
     y_mean = float(np.mean(yf))
     yc = yf - y_mean
-    n_features = Xf.shape[1]
-    # Scale alpha with sample count so regularization strength stays consistent as expanding window grows
-    eff_alpha = l2_alpha * max(len(yf) / 20000.0, 0.25)
-    gram = Xf.T @ Xf + eff_alpha * np.eye(n_features, dtype=np.float64)
-    rhs = Xf.T @ yc
-    coef = np.linalg.solve(gram, rhs)
+    n_samples, n_features = Xf.shape
+    eff_alpha = l2_alpha * max(n_samples / 20000.0, 0.25)
+
+    # Precompute Gram matrix & cross-term once (O(n * p^2)) so L-BFGS-B solves in <1 ms
+    gram = (Xf.T @ Xf) / max(n_samples, 1) + (eff_alpha / max(n_samples, 1)) * np.eye(n_features, dtype=np.float64)
+    rhs = (Xf.T @ yc) / max(n_samples, 1)
+
+    if feature_names is None:
+        coef = np.linalg.solve(gram, rhs)
+        return y_mean, coef
+
+    bounds = []
+    for name in feature_names:
+        sign = THEORY_SIGN_CONSTRAINTS.get(name, 0)
+        if sign > 0:
+            bounds.append((0.0, None))
+        elif sign < 0:
+            bounds.append((None, 0.0))
+        else:
+            bounds.append((None, None))
+
+    def obj_and_grad(w: np.ndarray) -> Tuple[float, np.ndarray]:
+        gw = gram @ w
+        val = 0.5 * float(w @ gw) - float(rhs @ w)
+        grad = gw - rhs
+        return val, grad
+
+    res = minimize(obj_and_grad, x0=np.zeros(n_features, dtype=np.float64), jac=True, method="L-BFGS-B", bounds=bounds)
+    coef = res.x if res.success else np.clip(np.linalg.solve(gram, rhs), -0.05, 0.05)
     return y_mean, coef
 
 
@@ -167,22 +228,24 @@ def _fit_lightgbm(
     use_gpu: bool = False,
     seed: int = 42,
 ):
-    """Fit shallow, strongly regularized LightGBM Huber regressor designed for noisy equity cross-sections."""
+    """Fit shallow, monotonicity-constrained, strongly regularized LightGBM Huber regressor."""
     import lightgbm as lgb
 
+    monotone = [THEORY_SIGN_CONSTRAINTS.get(f, 0) for f in feature_names]
     params = {
         "objective": "huber",
         "alpha": 0.25,
-        "learning_rate": 0.03,
+        "learning_rate": 0.025,
         "num_leaves": 7,
         "max_depth": 3,
-        "min_child_samples": max(50, min(200, len(y_train) // 50)),
+        "min_child_samples": max(80, min(300, len(y_train) // 40)),
         "subsample": 0.80,
         "subsample_freq": 1,
         "colsample_bytree": 0.70,
-        "reg_alpha": 5.0,
-        "reg_lambda": 25.0,
-        "n_estimators": 220,
+        "reg_alpha": 10.0,
+        "reg_lambda": 50.0,
+        "monotone_constraints": monotone,
+        "n_estimators": 180,
         "random_state": seed,
         "n_jobs": -1,
         "verbose": -1,
@@ -195,7 +258,6 @@ def _fit_lightgbm(
     try:
         model.fit(X_df, y_train)
     except Exception:
-        # Automatic graceful fallback to CPU if Kaggle GPU OpenCL driver unavailable
         params.pop("device", None)
         model = lgb.LGBMRegressor(**params)
         model.fit(X_df, y_train)
@@ -326,11 +388,12 @@ def map_learned_weights_to_v6(
     icir_weights: Dict[str, float],
     ridge_coef: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
-    """Translate trained price-pillar ICIR/Ridge weights into bounded 6-pillar Snowball v6 weights.
+    """Translate trained ICIR + Constrained Ridge signals into bounded 6-pillar Snowball v6 weights.
 
-    Preserves the institutional budget for fundamental pillars (`norm_val`, `quality`, `fund`)
-    while adapting the price-pillar allocation (`mom_qual`, `ind_mom`, `low_risk`) using
-    learned OOS signal strength, bounded strictly inside `WEIGHT_BOUNDS`.
+    - Always adapts price pillars (`mom_qual`, `ind_mom`, `low_risk`) using learned OOS strength.
+    - When Point-in-Time fundamentals (`pit_ep_z`, `pit_roe_z`, `pit_rule40_z`, etc.) were trained,
+      also adapts fundamental pillars (`norm_val`, `quality`, `fund`) via Bayesian shrinkage toward
+      `BASELINE_V6_WEIGHTS`, strictly bounded inside `WEIGHT_BOUNDS`.
     """
     out = dict(BASELINE_V6_WEIGHTS)
     price_budget = out["mom_qual"] + out["ind_mom"] + out["low_risk"]
@@ -350,7 +413,23 @@ def map_learned_weights_to_v6(
             lo, hi = WEIGHT_BOUNDS[dst]
             out[dst] = float(np.clip((val / tot_p) * price_budget, lo, hi))
 
-    # Re-normalize all 6 pillars to sum to exactly 1.00
+    # Also adapt fundamental pillars if PIT fundamental coefficients are available
+    if ridge_coef:
+        raw_fund = {}
+        for dst, src_cols in PIT_TO_V6_MAP.items():
+            vals = [max(float(ridge_coef[c]), 0.0) for c in src_cols if c in ridge_coef]
+            if vals:
+                raw_fund[dst] = float(np.mean(vals))
+        tot_f = sum(raw_fund.values())
+        if len(raw_fund) >= 2 and tot_f > 1e-12:
+            fund_budget = sum(BASELINE_V6_WEIGHTS[k] for k in raw_fund)
+            for dst, val in raw_fund.items():
+                prior_w = BASELINE_V6_WEIGHTS[dst]
+                learned_w = (val / tot_f) * fund_budget
+                # 50% Bayesian shrinkage toward institutional prior, clipped to WEIGHT_BOUNDS
+                lo, hi = WEIGHT_BOUNDS[dst]
+                out[dst] = float(np.clip(0.50 * prior_w + 0.50 * learned_w, lo, hi))
+
     s_all = sum(out.values())
     return {k: round(v / s_all, 4) for k, v in out.items()}
 
@@ -438,11 +517,11 @@ def run_purged_walkforward(
         test_s1 = sum(w_icir[c] * test_df[c].fillna(0.0).to_numpy(dtype=float) for c in w_icir if c in test_df.columns)
         test_df["pred_stage1_icir_shrinkage"] = test_s1
 
-        # 3. Stage 2: Cross-Sectional L2 Ridge
+        # 3. Stage 2: Theory-Sign-Constrained Cross-Sectional L2 Ridge
         X_tr = train_df[feature_cols].to_numpy(dtype=float)
         y_tr = train_df[target_col].to_numpy(dtype=float)
         X_te = test_df[feature_cols].to_numpy(dtype=float)
-        r_int, r_coef = _fit_ridge(X_tr, y_tr, l2_alpha=ridge_alpha)
+        r_int, r_coef = _fit_ridge(X_tr, y_tr, l2_alpha=ridge_alpha, feature_names=feature_cols)
         last_ridge_map = {col: float(val) for col, val in zip(feature_cols, r_coef)}
         train_s2 = _predict_ridge(X_tr, r_int, r_coef)
         test_df["pred_stage2_ridge"] = _predict_ridge(X_te, r_int, r_coef)

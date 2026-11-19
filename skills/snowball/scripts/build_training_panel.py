@@ -288,7 +288,7 @@ def _merge_pit_fundamentals(panel: pd.DataFrame, pit_csv: Path) -> pd.DataFrame:
     pit = pd.read_csv(pit_csv)
     if "ticker" not in pit.columns or "available_date" not in pit.columns:
         raise ValueError("PIT fundamentals CSV must contain 'ticker' and 'available_date' columns.")
-    pit["available_date"] = pd.to_datetime(pit["available_date"])
+    pit["available_date"] = pd.to_datetime(pit["available_date"]).astype("datetime64[ns]")
     pit = pit.sort_values("available_date")
 
     raw_map = {
@@ -304,6 +304,7 @@ def _merge_pit_fundamentals(panel: pd.DataFrame, pit_csv: Path) -> pd.DataFrame:
         return panel
 
     left = panel.sort_values("date").reset_index(drop=True)
+    left["date"] = pd.to_datetime(left["date"]).astype("datetime64[ns]")
     merged = pd.merge_asof(
         left,
         pit[["ticker", "available_date", *present_cols]],

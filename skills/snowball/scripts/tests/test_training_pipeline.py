@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 import build_training_panel as btp
+import fetch_pit_fundamentals as fpf
 import global_ranker as gr
 import train_walkforward as twf
 
@@ -144,3 +145,87 @@ def test_kaggle_notebook_is_valid_nbformat_v4():
     assert "run_purged_walkforward" in joined_code
     assert "export_training_artifacts" in joined_code
     assert "v6_learned_weights.json" in joined_all
+
+
+def test_constrained_ridge_forbids_high_volatility_chasing():
+    rng = np.random.default_rng(7)
+    n = 400
+    f_mom = rng.normal(0, 1, n)
+    f_vol = rng.normal(0, 1, n)
+    f_low = -f_vol + rng.normal(0, 0.2, n)
+    # Artificially reward high volatility (mimics bull-market survivorship trap)
+    y = 0.5 + 0.15 * f_vol + 0.05 * f_mom + rng.normal(0, 0.02, n)
+    feats = ["f_mom_qual", "f_vol_60d", "f_low_risk"]
+    X = np.column_stack([f_mom, f_vol, f_low])
+    _, coef = twf._fit_ridge(X, y, l2_alpha=10.0, feature_names=feats)
+    c_map = dict(zip(feats, coef))
+    assert c_map["f_mom_qual"] >= 0.0
+    assert c_map["f_vol_60d"] <= 1e-12, f"Constrained Ridge must not chase high volatility: {c_map}"
+    assert c_map["f_low_risk"] >= -1e-12, f"Constrained Ridge must not short low_risk: {c_map}"
+
+
+def test_sec_xbrl_parser_and_pit_merge_handles_datetime_resolution():
+    payload = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-Q", "start": "2023-01-01", "end": "2023-03-31", "filed": "2023-05-01", "val": 1000.0},
+                            {"form": "10-Q", "start": "2024-01-01", "end": "2024-03-31", "filed": "2024-05-01", "val": 1300.0},
+                        ]
+                    }
+                },
+                "NetCashProvidedByUsedInOperatingActivities": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-Q", "start": "2024-01-01", "end": "2024-03-31", "filed": "2024-05-01", "val": 390.0},
+                        ]
+                    }
+                },
+                "PaymentsToAcquirePropertyPlantAndEquipment": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-Q", "start": "2024-01-01", "end": "2024-03-31", "filed": "2024-05-01", "val": 65.0},
+                        ]
+                    }
+                },
+                "EarningsPerShareDiluted": {
+                    "units": {
+                        "USD/shares": [
+                            {"form": "10-K", "start": "2023-01-01", "end": "2023-12-31", "filed": "2024-02-15", "val": 5.0},
+                        ]
+                    }
+                },
+            }
+        }
+    }
+    pit_df = fpf.parse_sec_company_facts("AAPL", payload, min_year=2023)
+    assert len(pit_df) == 2
+    latest = pit_df.iloc[-1]
+    assert latest["available_date"] == "2024-05-02"  # filed + 1 day
+    assert abs(latest["rev_yoy"] - 0.30) < 1e-6
+    assert abs(latest["fcf_margin"] - 0.25) < 1e-6
+    assert abs(latest["rule40_pct"] - 55.0) < 1e-6
+
+    # Merge into panel with datetime64[ns] dates (tests Pandas 3.0 ns vs us resolution safety)
+    panel = pd.DataFrame({
+        "date": pd.to_datetime(["2024-04-26", "2024-05-03", "2024-05-03", "2024-05-03", "2024-05-03"]).astype("datetime64[ns]"),
+        "ticker": ["AAPL", "AAPL", "MSFT", "NVDA", "GOOGL"],
+        "market": ["US"] * 5,
+        "industry": ["tech"] * 5,
+        "close_usd": [100.0, 100.0, 100.0, 100.0, 100.0],
+    })
+    # Add peers on 2024-05-02 so cross-sectional z-score has std > 0
+    peers = pd.DataFrame([
+        {"ticker": "MSFT", "available_date": "2024-05-02", "rule40_pct": 40.0, "rev_yoy": 0.15, "fcf_margin": 0.25, "ttm_eps": 4.0, "ep_yield": np.nan, "roe": 0.3, "gross_margin_chg": 0.01},
+        {"ticker": "NVDA", "available_date": "2024-05-02", "rule40_pct": 80.0, "rev_yoy": 0.50, "fcf_margin": 0.30, "ttm_eps": 3.0, "ep_yield": np.nan, "roe": 0.5, "gross_margin_chg": 0.05},
+        {"ticker": "GOOGL", "available_date": "2024-05-02", "rule40_pct": 35.0, "rev_yoy": 0.10, "fcf_margin": 0.25, "ttm_eps": 6.0, "ep_yield": np.nan, "roe": 0.25, "gross_margin_chg": 0.0},
+    ])
+    full_pit = pd.concat([pit_df, peers], ignore_index=True)
+    merged = fpf.merge_pit_into_panel(panel, full_pit)
+    # 2024-04-26 is BEFORE 2024-05-02 -> AAPL rule40 must be NaN (zero look-ahead!)
+    before_val = merged.loc[(merged["ticker"] == "AAPL") & (merged["date"] == pd.Timestamp("2024-04-26")), "pit_rule40_z"].iloc[0]
+    after_val = merged.loc[(merged["ticker"] == "AAPL") & (merged["date"] == pd.Timestamp("2024-05-03")), "pit_rule40_z"].iloc[0]
+    assert pd.isna(before_val)
+    assert np.isfinite(after_val)
