@@ -9,7 +9,10 @@
     "GBP": 1.27
   },
   "currency_fx_usd_twd": 32.5,
+  "monthly_inflow": 1000,
   "monthly_inflow_twd": 10000,
+  "expected_annual_return_pct": 8.5,
+  "default_tint": "blue",
   "core_ratio_pct": 60,
   "satellite_target_weight": 0.10,
   "max_odd_lot_price": 500.0,

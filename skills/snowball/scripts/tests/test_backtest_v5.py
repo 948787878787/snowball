@@ -61,6 +61,10 @@ def test_dashboard_template_and_injection():
 
     assert gd.TEMPLATE_HTML.exists()
     html = gd.TEMPLATE_HTML.read_text(encoding="utf-8")
+    assert "backdrop-filter" in html
+    for tint in ("red", "orange", "yellow", "green", "blue", "indigo", "violet"):
+        assert f'data-tint="{tint}"' in html
+        assert f"setTint('{tint}')" in html
     out = gd.inject_data(html, {"title": "Test Dashboard", "defaultMonthly": 12000})
     assert '"defaultMonthly": 12000' in out
     assert "/*__DATA_START__*/" in out
@@ -75,13 +79,15 @@ def test_generate_dashboard_offline_end_to_end(tmp_path):
     assert payload["priceDate"] == "demo"
     assert len(payload["holdings"]) == len(cfg["holdings"])
     assert len(payload["screener"]) == len(cfg["watchlist"])
+    assert "weeklyOutlook" in payload and len(payload["weeklyOutlook"]["actions"]) == 3
+    assert payload["defaultTint"] == "blue"
 
     out_file = tmp_path / "out.html"
     html = gd.TEMPLATE_HTML.read_text(encoding="utf-8")
     out_file.write_text(gd.inject_data(html, payload), encoding="utf-8")
     rendered = out_file.read_text(encoding="utf-8")
     assert "Snowball" in rendered
-    assert '"defaultMonthly": 10000' in rendered
+    assert '"defaultMonthly": 1000' in rendered
 
 
 def test_score_predictions_cli_brier_and_bss(tmp_path):

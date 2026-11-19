@@ -33,7 +33,7 @@ Designed to work seamlessly across **Antigravity (AGY)**, **Claude Code**, **Ope
   - **Point-in-Time Revenue Momentum (`F_FinStmt`)**: Trailing 3-month revenue YoY + 3-month acceleration lagged strictly to the 11th of the following month.
   - **8%-Capped Cyclical-Normalized Industry-Neutral Value (`F_NormVal`)**: Within-peer-group valuation (`1/PBR` for financials, normalized `1/PER` for non-financials) plus capped dividend yield (`<= 8.0%`) with 5-year rolling median normalization for cyclical industries.
 - **Institutional Audit Harness**: 4 staggered overlapping Jegadeesh-Titman cohorts, true weekly mark-to-market MDD, Newey-West (`lags = 6`) t-stats, Jensen's Alpha vs. equal-weight total return, and a realistic retail odd-lot cash-flow simulator (`0.30%` odd-lot slippage + commission + sell tax).
-- **Interactive Light/Dark HTML Workbench (`generate_dashboard.py`)**: Self-contained HTML dashboard with Light/Dark/System themes, `localStorage` persistence, editable holdings, monthly Core+Satellite odd-lot order calculator, and 10-year compounding simulator.
+- **Minimalist Liquid Glass HTML Dashboard (`generate_dashboard.py`)**: Self-contained frosted-glass (`backdrop-filter`) consumer UI with **7 selectable rainbow glass tints (Red, Orange, Yellow, Green, Blue, Indigo, Violet)**, Light/Dark/Auto mode, `localStorage` persistence, directly editable monthly contribution & expected annual return rate, next-week market outlook & action plan, discipline checklist, editable holdings, and Y1–Y10 compounding calculator.
 - **Brier Score Calibration Tracker (`score_predictions.py`)**: Evaluates probabilistic forecasts and reports Hit Rate, Mean Brier Score, and Brier Skill Score (BSS).
 
 ---

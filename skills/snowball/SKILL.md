@@ -6,7 +6,8 @@ description: >-
   Use when the user asks to rank global or regional equities using empirical factors (Residual Momentum,
   Full-Group Industry Momentum, Revenue Growth, and 8%-Capped Industry-Neutral Value), run point-in-time
   4-cohort staggered backtests with weekly mark-to-market MDD, score probabilistic forecasts (Brier Score / BSS),
-  or generate a Light/Dark interactive HTML portfolio workbench with buy-only cash-flow rebalancing rules.
+  or generate a minimalist Liquid Glass interactive HTML portfolio dashboard (with 7 rainbow glass tints:
+  red, orange, yellow, green, blue, indigo, violet) and buy-only cash-flow rebalancing rules.
 ---
 
 # Snowball — Global Equity Multi-Factor & Cash-Flow Rebalancing Skill (v5)

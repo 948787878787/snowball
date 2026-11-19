@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Generic Open-Source v5 HTML Dashboard Generator (Zero-PII).
+Generic Open-Source Snowball Liquid Glass HTML Dashboard Generator (Zero-PII).
 
 Reads any local portfolio JSON (see references/portfolio-template.json), computes latest
-v5 multi-factor rankings from backtest_v5, and writes a self-contained Dark/Light HTML
-dashboard with localStorage persistence, editable holdings, an odd-lot order calculator,
-and an interactive 10-year compounding simulator.
+v5 multi-factor rankings, and writes a minimalist Liquid Glass HTML dashboard featuring
+7 selectable rainbow glass tints (red/orange/yellow/green/blue/indigo/violet), Light/Dark/System
+themes, editable monthly deposit & annual return rate, next-week outlook & action guidance,
+discipline tasks, editable holdings, and a 10-year year-by-year compounding calculator.
 
 Usage:
-    python generate_dashboard.py --portfolio ./my_portfolio.json --output ./v5_dashboard.html
+    python generate_dashboard.py --portfolio ./my_portfolio.json --output ./snowball_dashboard.html
 """
 
 import argparse
@@ -30,27 +31,35 @@ from universe import group_of
 STANDALONE_THEME_CSS = """
   <style>
     :root {
-      --background: #090d16;
+      --background: #080c14;
       --card: #111827;
-      --secondary: #1a2333;
-      --border: #243044;
-      --foreground: #f1f5f9;
+      --secondary: #1e293b;
+      --border: rgba(255, 255, 255, 0.12);
+      --foreground: #f8fafc;
       --muted-foreground: #94a3b8;
-      --primary: #10b981;
-      --primary-foreground: #022c22;
-      --secondary-foreground: #e2e8f0;
+      --primary: #f8fafc;
+      --primary-foreground: #0f172a;
+      --glass-bg: rgba(17, 24, 39, 0.54);
+      --glass-sub: rgba(30, 41, 59, 0.44);
+      --glass-border: rgba(255, 255, 255, 0.13);
+      --glass-highlight: rgba(255, 255, 255, 0.08);
+      --orb-opacity: 0.26;
     }
     @media (prefers-color-scheme: light) {
       :root {
-        --background: #f8fafc;
+        --background: #f5f7fb;
         --card: #ffffff;
         --secondary: #f1f5f9;
-        --border: #e2e8f0;
+        --border: rgba(15, 23, 42, 0.10);
         --foreground: #0f172a;
         --muted-foreground: #64748b;
         --primary: #0f172a;
         --primary-foreground: #ffffff;
-        --secondary-foreground: #334155;
+        --glass-bg: rgba(255, 255, 255, 0.62);
+        --glass-sub: rgba(255, 255, 255, 0.46);
+        --glass-border: rgba(255, 255, 255, 0.72);
+        --glass-highlight: rgba(255, 255, 255, 0.85);
+        --orb-opacity: 0.28;
       }
     }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif; }
@@ -68,12 +77,24 @@ def inject_data(html: str, payload: dict) -> str:
     return re.sub(r"/\*__DATA_START__\*/.*?/\*__DATA_END__\*/", lambda _: data_js, html, flags=re.S)
 
 
+def _derive_tag_and_action(h: dict, price: float) -> tuple[bool, str, str]:
+    target = h.get("target_sell")
+    role = str(h.get("role", "hold")).lower()
+    note = str(h.get("note", "")).strip()
+    if target is not None:
+        return True, "待賣", note or f"反彈至目標價 {target} 獲利減碼"
+    if role == "core_dca":
+        return False, "加碼", note or "核心標的：每月固定定期定額買進"
+    if role == "frozen":
+        return False, "凍結", note or "不賣也不加碼，靜待回穩"
+    return False, "續抱", note or ("帳面正報酬，原地續抱觀察" if price >= float(h["cost"]) else "原地續抱領息觀察")
+
+
 def build_payload(cfg: dict, offline: bool = False) -> dict:
     close_df = None
     val_df = None
     s_inc = None
     latest_daily_dt = "demo"
-    latest_panel_dt_str = "demo"
     gmap = group_of()
 
     if not offline:
@@ -84,7 +105,6 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
             val_df = data.load_valuation().sort_values("date").groupby("stock_id").last()
             latest_daily_dt = close_df.index[-1].strftime("%Y-%m-%d")
             latest_panel_dt = v5["v5_income"].index[-1]
-            latest_panel_dt_str = latest_panel_dt.strftime("%Y-%m-%d")
             s_inc = v5["v5_income"].loc[latest_panel_dt].dropna().sort_values(ascending=False)
         except Exception as exc:
             print(f"Notice: Live cache unavailable ({exc}); generating dashboard with portfolio fallback data.")
@@ -96,16 +116,21 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
             px = round(float(close_df[code].dropna().iloc[-1]), 2)
         else:
             px = float(h.get("fallback_price", h["cost"]))
+        sell_list, tag, action = _derive_tag_and_action(h, px)
+        mkt = str(h.get("market", "TW")).upper()
+        default_curr = {"US": "USD", "JP": "JPY", "EU": "EUR", "HK": "HKD", "UK": "GBP"}.get(mkt, "TWD")
         holdings_out.append({
-            "mkt": str(h.get("market", "TW")).upper(),
+            "mkt": mkt,
+            "currency": str(h.get("currency", default_curr)).upper(),
             "code": code,
             "name": h.get("name", code),
             "shares": float(h["shares"]),
             "cost": float(h["cost"]),
             "price": px,
             "targetSell": h.get("target_sell"),
-            "sellList": h.get("target_sell") is not None,
-            "action": h.get("note", "Core DCA" if h.get("role") == "core_dca" else "Monitor"),
+            "sellList": sell_list,
+            "tag": h.get("tag", tag),
+            "action": action,
         })
 
     watch_codes = [str(w["code"]) for w in cfg.get("watchlist", [])]
@@ -139,54 +164,86 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
                 "v5": round(1.5 - idx * 0.2, 3),
             })
 
-    top_sat = screener_out[0]["code"] if screener_out else "5880"
-    core_code = str(cfg.get("core_etf_code", "0056"))
-    core_px = float(cfg.get("core_etf_price", 40.0))
-    for h in holdings_out:
-        if h["code"] == core_code:
-            core_px = h["price"]
+    base_currency = str(cfg.get("base_currency", "TWD")).upper()
+    fx_to_base = cfg.get("fx_rates_to_base")
+    if not isinstance(fx_to_base, dict):
+        fx_to_base = (
+            {"USD": 1.0, "TWD": 0.0308, "EUR": 1.08, "JPY": 0.0065, "HKD": 0.128, "GBP": 1.27}
+            if base_currency == "USD"
+            else {"TWD": 1.0, "USD": float(cfg.get("currency_fx_usd_twd", 32.5)), "EUR": 35.1, "JPY": 0.21, "HKD": 4.16, "GBP": 41.2}
+        )
+
+    default_monthly = int(cfg.get("monthly_inflow", cfg.get("monthly_inflow_twd", 10000)))
+    core_ratio = float(cfg.get("core_ratio_pct", 60)) / 100.0
+    top_sat = screener_out[0]["code"] if screener_out else "VT"
+
+    weekly_outlook = cfg.get("weekly_outlook") or {
+        "period": f"未來一週觀察（基準日 {latest_daily_dt}）",
+        "posture": "紀律分批 · 逢回加碼不追高",
+        "summary": (
+            f"維持核心定投與只買不賣現金流再平衡；目前衛星觀察榜首為 {top_sat}。"
+            "未來一週若市場震盪回測，優先以每月新現金流分批補齊低估值與低權重標的。"
+        ),
+        "actions": [
+            {
+                "label": "核心定投",
+                "title": "按表執行每月核心買進",
+                "detail": f"將每月 {int(round(core_ratio * 100))}% 資金固定投入核心 ETF，平滑波動並累積複利底倉。",
+            },
+            {
+                "label": "衛星狙擊",
+                "title": f"優先追蹤 {top_sat} 與前 20% 強勢股",
+                "detail": "剩餘衛星資金優先流向 v5 排名靠前且估值合理之標的，分批逢低切入。",
+            },
+            {
+                "label": "風控紀律",
+                "title": "達標贏家減碼 · 虧損不亂砍",
+                "detail": "僅在單一獲利持股觸及目標賣價或權重超標時減碼換股，絕不在低檔認賠。",
+            },
+        ],
+    }
+
+    tasks = cfg.get("tasks") or [
+        {
+            "id": "t1",
+            "title": "按表執行本月核心 ETF 定期定額扣款",
+            "desc": "固定投入核心比例資金，維持長期紀律與低交易成本。",
+        },
+        {
+            "id": "t2",
+            "title": f"追蹤衛星候選 {top_sat} 與觀察名單進場區間",
+            "desc": "搭配 global_ranker.py 定期更新全球多因子排名。",
+        },
+        {
+            "id": "t3",
+            "title": "檢查待賣清單是否觸及目標獲利價",
+            "desc": "遵守只買不賣現金流規則，獲利達標再換股轉入核心池。",
+        },
+    ]
 
     return {
-        "storageKey": "snowball_v5_open_dashboard_v1",
-        "title": "Snowball — 實證選股與現金流工作台",
+        "storageKey": "snowball_glass_open_v2",
+        "title": cfg.get("title", "Snowball 全球投資儀表板"),
+        "subtitle": cfg.get("subtitle", "v5 實證多因子 · 只買不賣現金流再平衡"),
         "priceDate": latest_daily_dt,
-        "modelDate": latest_panel_dt_str,
+        "baseCurrency": base_currency,
         "fxUsdTwd": float(cfg.get("currency_fx_usd_twd", 32.5)),
-        "defaultMonthly": int(cfg.get("monthly_inflow_twd", 10000)),
-        "defaultCoreRatio": int(cfg.get("core_ratio_pct", 60)),
-        "coreSymbol": {"code": core_code, "name": cfg.get("core_etf_name", "Core ETF"), "price": core_px},
-        "defaultSatelliteCode": top_sat,
-        "card3": {
-            "title": "v5 樣本外 Jensen Alpha",
-            "val": "+14.33%",
-            "sub": "NW6 t = 2.16 · 夏普 2.08",
-        },
-        "card4": {
-            "title": "v5 榜首衛星候選",
-            "val": top_sat,
-            "sub": "點選「v5 選股與買單計算機」試算",
-        },
-        "watchCodes": watch_codes,
+        "fxToBase": fx_to_base,
+        "defaultMonthly": default_monthly,
+        "defaultRate": float(cfg.get("expected_annual_return_pct", 8.5)),
+        "defaultTint": str(cfg.get("default_tint", "blue")).lower(),
+        "coreRatio": core_ratio,
+        "coreLabel": cfg.get("core_label", "核心 ETF"),
+        "tasksTitle": cfg.get("tasks_title", "每週紀律任務清單"),
+        "weeklyOutlook": weekly_outlook,
+        "tasks": tasks,
         "holdings": holdings_out,
         "screener": screener_out,
-        "auditModels": [
-            {"name": "v3 平滑版", "ic": 0.0773, "icT": 3.93, "longGross": 11.2, "beta": 1.049, "alpha": 10.36, "t": 1.52, "mdd": -18.1, "sharpe": 1.88, "turn": 31.9, "sectors": 10.1, "hl": False},
-            {"name": "v4 高息版", "ic": 0.0924, "icT": 4.57, "longGross": 12.3, "beta": 0.952, "alpha": 10.31, "t": 1.46, "mdd": -15.7, "sharpe": 1.84, "turn": 38.1, "sectors": 9.1, "hl": False},
-            {"name": "v5 純三因子", "ic": 0.0950, "icT": 5.14, "longGross": 14.0, "beta": 1.166, "alpha": 11.15, "t": 1.69, "mdd": -23.2, "sharpe": 1.88, "turn": 27.2, "sectors": 9.9, "hl": False},
-            {"name": "v5 高息防禦版 ★", "ic": 0.0960, "icT": 5.63, "longGross": 14.6, "beta": 0.961, "alpha": 14.33, "t": 2.16, "mdd": -17.4, "sharpe": 2.08, "turn": 24.8, "sectors": 11.2, "hl": True},
-        ],
-        "simBench": [
-            {"name": "v5 高息防禦 (只買不賣+贏家減碼)", "val": 204200, "roi": "+104.2%", "color": "bg-emerald-500"},
-            {"name": "v5 純三因子 (只買不賣+贏家減碼)", "val": 198800, "roi": "+98.8%", "color": "bg-sky-500"},
-            {"name": "基準1：84 檔等權定期定額", "val": 194200, "roi": "+94.2%", "color": "bg-slate-400"},
-            {"name": "核心+衛星 60/40 (低集中度 ★)", "val": 187700, "roi": "+87.7%", "color": "bg-amber-500"},
-            {"name": "基準2：高息籃子 (ETF 代理)", "val": 178900, "roi": "+78.9%", "color": "bg-slate-500"},
-        ],
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate v5 interactive HTML dashboard.")
+    parser = argparse.ArgumentParser(description="Generate Snowball Liquid Glass HTML dashboard.")
     parser.add_argument(
         "--portfolio",
         type=Path,
@@ -196,7 +253,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("v5_dashboard.html"),
+        default=Path("snowball_dashboard.html"),
         help="Output HTML path.",
     )
     parser.add_argument(
@@ -211,7 +268,7 @@ def main() -> None:
     html = TEMPLATE_HTML.read_text(encoding="utf-8")
     out_html = inject_data(html, payload).replace("<style>", f"{STANDALONE_THEME_CSS}\n  <style>", 1)
     args.output.write_text(out_html, encoding="utf-8")
-    print(f"Generated interactive v5 dashboard: {args.output}")
+    print(f"Generated Snowball Liquid Glass dashboard: {args.output}")
 
 
 if __name__ == "__main__":
