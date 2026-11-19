@@ -1,4 +1,4 @@
-# Snowball (`snowball`)
+# Snowball 
 
 An open-source **Antigravity Agent Skill** & Python quantitative research workbench for **Taiwan equity multi-factor ranking (v5)** and **buy-only retail cash-flow rebalancing** — built to compound high-cash-flow equity snowballs systematically.
 
