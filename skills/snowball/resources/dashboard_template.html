@@ -1,15 +1,16 @@
 <!DOCTYPE html>
-<html lang="zh-Hant" data-tint="blue">
+<html lang="en" data-tint="blue">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Snowball · Minimalist Liquid Glass Portfolio Workbench</title>
+  <title>Snowball · Minimalist Liquid Glass Portfolio</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <style>
     /* Automatic theme adaptation (inherits host/system color scheme) */
     html {
       --glass-bg: color-mix(in srgb, var(--card) 62%, transparent);
       --glass-sub: color-mix(in srgb, var(--secondary) 58%, transparent);
+      --glass-pop: color-mix(in srgb, var(--card) 86%, transparent);
       --glass-border: color-mix(in srgb, var(--foreground) 12%, transparent);
       --glass-highlight: color-mix(in srgb, var(--foreground) 6%, transparent);
       --orb-opacity: 0.25;
@@ -48,7 +49,7 @@
       transition: background 0.45s ease;
     }
 
-    /* Minimalist Frosted Glass Surface */
+    /* Minimalist Frosted Glass Surfaces */
     .glass {
       background: linear-gradient(
         145deg,
@@ -62,6 +63,19 @@
         inset 0 1px 0 var(--glass-highlight),
         0 10px 30px -12px rgba(var(--tint-rgb), 0.14);
       transition: background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+    }
+    .glass-pop {
+      background: linear-gradient(
+        145deg,
+        color-mix(in srgb, var(--glass-pop) 94%, rgba(var(--tint-rgb), 0.08)),
+        var(--glass-pop)
+      );
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: 1px solid var(--glass-border);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 20px 48px -12px rgba(0, 0, 0, 0.28);
     }
     .glass-sub {
       background: var(--glass-sub);
@@ -80,16 +94,16 @@
     .tint-btn-active { background-color: rgb(var(--tint-rgb)); color: #ffffff; }
     .tint-ring:focus { outline: none; box-shadow: 0 0 0 2px rgba(var(--tint-rgb), 0.45); border-color: rgba(var(--tint-rgb), 0.6); }
     .swatch {
-      width: 22px;
-      height: 22px;
+      width: 26px;
+      height: 26px;
       border-radius: 9999px;
       cursor: pointer;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
-      border: 2px solid rgba(255, 255, 255, 0.65);
+      border: 2px solid rgba(255, 255, 255, 0.72);
     }
-    .swatch:hover { transform: scale(1.14); }
+    .swatch:hover { transform: scale(1.12); }
     .swatch.active {
-      transform: scale(1.18);
+      transform: scale(1.15);
       box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--tint-hex);
     }
     .tabular-nums { font-variant-numeric: tabular-nums; }
@@ -100,47 +114,103 @@
 
   <div class="max-w-5xl mx-auto px-4 py-7 md:px-8 md:py-10 space-y-7">
 
-    <!-- Minimal Header + 7-Color Rainbow Swatches + Light/Dark Switch -->
-    <header class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <!-- Ultra-Clean Header + Settings Button & Popover -->
+    <header class="flex items-center justify-between gap-4 relative">
       <div class="space-y-1">
         <div class="flex items-center gap-2.5">
-          <span class="w-2.5 h-2.5 rounded-full" style="background: var(--tint-hex); box-shadow: 0 0 12px var(--tint-hex);"></span>
-          <h1 id="hdr-title" class="text-2xl font-semibold tracking-tight">Snowball 全球投資儀表板</h1>
+          <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background: var(--tint-hex); box-shadow: 0 0 12px var(--tint-hex);"></span>
+          <h1 id="hdr-title" class="text-2xl font-semibold tracking-tight">Snowball Global Portfolio</h1>
         </div>
-        <p id="hdr-sub" class="text-xs text-[var(--muted-foreground)]">收盤基準 demo · 極簡毛玻璃版</p>
+        <p id="hdr-sub" class="text-xs text-[var(--muted-foreground)]">--</p>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2.5">
-        <!-- 7-Color Rainbow Glass Tint Selector -->
-        <div class="glass rounded-full px-3 py-1.5 flex items-center gap-2" role="group" aria-label="七彩毛玻璃色調">
-          <span class="text-xs text-[var(--muted-foreground)] mr-0.5 hidden sm:inline">色調</span>
-          <button onclick="setTint('red')"    id="sw-red"    title="紅 Red"    aria-label="紅色毛玻璃" class="swatch" style="background:#ef4444;"></button>
-          <button onclick="setTint('orange')" id="sw-orange" title="橙 Orange" aria-label="橙色毛玻璃" class="swatch" style="background:#f97316;"></button>
-          <button onclick="setTint('yellow')" id="sw-yellow" title="黃 Yellow" aria-label="黃色毛玻璃" class="swatch" style="background:#eab308;"></button>
-          <button onclick="setTint('green')"  id="sw-green"  title="綠 Green"  aria-label="綠色毛玻璃" class="swatch" style="background:#10b981;"></button>
-          <button onclick="setTint('blue')"   id="sw-blue"   title="藍 Blue"   aria-label="藍色毛玻璃" class="swatch" style="background:#3b82f6;"></button>
-          <button onclick="setTint('indigo')" id="sw-indigo" title="靛 Indigo" aria-label="靛色毛玻璃" class="swatch" style="background:#6366f1;"></button>
-          <button onclick="setTint('violet')" id="sw-violet" title="紫 Violet" aria-label="紫色毛玻璃" class="swatch" style="background:#a855f7;"></button>
+      <!-- Settings Trigger + Floating Liquid Glass Popover -->
+      <div class="relative" id="settings-wrap">
+        <button
+          id="btn-settings"
+          onclick="toggleSettings(event)"
+          aria-haspopup="true"
+          aria-expanded="false"
+          class="glass rounded-full px-3.5 py-2 inline-flex items-center gap-2 text-xs font-medium text-[var(--foreground)] hover:opacity-90 transition cursor-pointer"
+        >
+          <svg class="w-4 h-4 tint-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span id="lbl-settings">Settings</span>
+        </button>
+
+        <div
+          id="settings-panel"
+          class="hidden absolute right-0 mt-2.5 w-72 sm:w-80 glass-pop rounded-3xl p-5 space-y-5 z-50"
+          role="dialog"
+          aria-label="Settings"
+        >
+          <!-- Theme Color (7 Rainbow Glass Tints) -->
+          <div class="space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span id="lbl-theme-color" class="text-xs font-semibold text-[var(--foreground)]">Theme Color</span>
+              <span id="lbl-active-tint" class="text-xs tint-text font-medium">Blue</span>
+            </div>
+            <div class="flex items-center justify-between gap-2 pt-0.5" role="group" aria-label="Theme Color">
+              <button onclick="setTint('red')"    id="sw-red"    aria-label="Red"    class="swatch" style="background:#ef4444;"></button>
+              <button onclick="setTint('orange')" id="sw-orange" aria-label="Orange" class="swatch" style="background:#f97316;"></button>
+              <button onclick="setTint('yellow')" id="sw-yellow" aria-label="Yellow" class="swatch" style="background:#eab308;"></button>
+              <button onclick="setTint('green')"  id="sw-green"  aria-label="Green"  class="swatch" style="background:#10b981;"></button>
+              <button onclick="setTint('blue')"   id="sw-blue"   aria-label="Blue"   class="swatch" style="background:#3b82f6;"></button>
+              <button onclick="setTint('indigo')" id="sw-indigo" aria-label="Indigo" class="swatch" style="background:#6366f1;"></button>
+              <button onclick="setTint('violet')" id="sw-violet" aria-label="Violet" class="swatch" style="background:#a855f7;"></button>
+            </div>
+          </div>
+
+          <div class="border-t border-[var(--glass-border)]"></div>
+
+          <!-- Language (EN default, ZH, JA, KO, DE) -->
+          <div class="space-y-2.5">
+            <span id="lbl-language" class="block text-xs font-semibold text-[var(--foreground)]">Language</span>
+            <div class="grid grid-cols-2 gap-2" role="group" aria-label="Language">
+              <button onclick="setLang('en')" id="lang-en" class="lang-btn px-3 py-1.5 rounded-xl text-xs font-medium transition text-left">English</button>
+              <button onclick="setLang('zh')" id="lang-zh" class="lang-btn px-3 py-1.5 rounded-xl text-xs font-medium transition text-left">繁體中文</button>
+              <button onclick="setLang('ja')" id="lang-ja" class="lang-btn px-3 py-1.5 rounded-xl text-xs font-medium transition text-left">日本語</button>
+              <button onclick="setLang('ko')" id="lang-ko" class="lang-btn px-3 py-1.5 rounded-xl text-xs font-medium transition text-left">한국어</button>
+              <button onclick="setLang('de')" id="lang-de" class="lang-btn px-3 py-1.5 rounded-xl text-xs font-medium transition text-left col-span-2">Deutsch</button>
+            </div>
+          </div>
+
+          <div class="border-t border-[var(--glass-border)]"></div>
+
+          <!-- Currency (USD default, TWD, EUR, JPY, HKD, KRW) -->
+          <div class="space-y-2.5">
+            <span id="lbl-currency" class="block text-xs font-semibold text-[var(--foreground)]">Currency</span>
+            <div class="grid grid-cols-3 gap-2" role="group" aria-label="Currency">
+              <button onclick="setCurrency('USD')" id="cur-USD" class="cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium transition text-center">$ USD</button>
+              <button onclick="setCurrency('TWD')" id="cur-TWD" class="cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium transition text-center">NT$ TWD</button>
+              <button onclick="setCurrency('EUR')" id="cur-EUR" class="cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium transition text-center">€ EUR</button>
+              <button onclick="setCurrency('JPY')" id="cur-JPY" class="cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium transition text-center">¥ JPY</button>
+              <button onclick="setCurrency('HKD')" id="cur-HKD" class="cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium transition text-center">HK$ HKD</button>
+              <button onclick="setCurrency('KRW')" id="cur-KRW" class="cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium transition text-center">₩ KRW</button>
+            </div>
+          </div>
         </div>
       </div>
     </header>
 
-    <!-- 1. 四大核心指標：總投入金額 / 總資產 / 每月投入 / 年報酬率 -->
+    <!-- 1. Four Core KPIs -->
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
       <div class="glass rounded-3xl p-5 space-y-1.5">
-        <div class="text-xs text-[var(--muted-foreground)]">總投入金額</div>
+        <div id="lbl-kpi-cost" class="text-xs text-[var(--muted-foreground)]">Total Invested</div>
         <div id="kpi-cost" class="text-2xl font-semibold tracking-tight">--</div>
         <div id="kpi-cost-sub" class="text-xs text-[var(--muted-foreground)]">--</div>
       </div>
 
       <div class="glass rounded-3xl p-5 space-y-1.5">
-        <div class="text-xs text-[var(--muted-foreground)]">總資產</div>
+        <div id="lbl-kpi-mv" class="text-xs text-[var(--muted-foreground)]">Total Assets</div>
         <div id="kpi-mv" class="text-2xl font-semibold tracking-tight">--</div>
         <div id="kpi-pnl" class="text-xs font-medium">--</div>
       </div>
 
       <div class="glass glass-accent rounded-3xl p-5 space-y-1.5">
-        <label for="in-monthly" class="block text-xs font-medium tint-text">每月投入金額</label>
+        <label id="lbl-kpi-monthly" for="in-monthly" class="block text-xs font-medium tint-text">Monthly Contribution</label>
         <div class="flex items-baseline gap-2">
           <input
             id="in-monthly"
@@ -152,13 +222,13 @@
             oninput="syncMonthly(this.value)"
             class="w-full glass-sub tint-ring rounded-2xl px-3 py-1 text-xl font-semibold text-[var(--foreground)]"
           />
-          <span id="unit-monthly" class="text-xs text-[var(--muted-foreground)] shrink-0">USD/月</span>
+          <span id="unit-monthly" class="text-xs text-[var(--muted-foreground)] shrink-0">USD/mo</span>
         </div>
         <div id="kpi-monthly-sub" class="text-xs text-[var(--muted-foreground)]">--</div>
       </div>
 
       <div class="glass rounded-3xl p-5 space-y-1.5">
-        <label for="in-rate" class="block text-xs font-medium tint-text">預估年報酬率</label>
+        <label id="lbl-kpi-rate" for="in-rate" class="block text-xs font-medium tint-text">Expected Annual Return</label>
         <div class="flex items-baseline gap-2">
           <input
             id="in-rate"
@@ -170,17 +240,17 @@
             oninput="syncRate(this.value)"
             class="w-full glass-sub tint-ring rounded-2xl px-3 py-1 text-xl font-semibold text-[var(--foreground)]"
           />
-          <span class="text-xs text-[var(--muted-foreground)] shrink-0">% / 年</span>
+          <span id="unit-rate" class="text-xs text-[var(--muted-foreground)] shrink-0">% / yr</span>
         </div>
         <div id="kpi-rate-sub" class="text-xs text-[var(--muted-foreground)]">--</div>
       </div>
     </section>
 
-    <!-- 2. 未來一週行情與操作重點 -->
+    <!-- 2. Next-Week Market Outlook & Actions -->
     <section class="glass rounded-3xl p-5 md:p-6 space-y-4">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div class="space-y-0.5">
-          <h2 class="text-base font-semibold">未來一週行情與操作重點</h2>
+          <h2 id="lbl-wk-title" class="text-base font-semibold">Next-Week Outlook &amp; Action Plan</h2>
           <p id="wk-period" class="text-xs text-[var(--muted-foreground)]">--</p>
         </div>
         <span id="wk-posture" class="self-start sm:self-auto px-3 py-1 rounded-full text-xs font-medium tint-bg-soft">--</span>
@@ -189,31 +259,31 @@
       <div id="wk-actions" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
     </section>
 
-    <!-- 3. 任務清單 -->
+    <!-- 3. Action Tasks -->
     <section class="glass rounded-3xl p-5 md:p-6 space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 id="tasks-title" class="text-base font-semibold">執行任務清單</h2>
-          <p class="text-xs text-[var(--muted-foreground)]">點擊勾選即可自動記憶於本機瀏覽器</p>
+          <h2 id="tasks-title" class="text-base font-semibold">Action Checklist</h2>
+          <p id="lbl-tasks-sub" class="text-xs text-[var(--muted-foreground)]">Saved automatically in your browser</p>
         </div>
-        <span id="task-counter" class="text-xs font-medium tint-text tabular-nums">0 / 3 完成</span>
+        <span id="task-counter" class="text-xs font-medium tint-text tabular-nums">0 / 3</span>
       </div>
       <div id="tasks-list" class="space-y-2.5"></div>
     </section>
 
-    <!-- 4. 持倉與未來一週操作指引 -->
+    <!-- 4. Holdings & Action Guide -->
     <section class="glass rounded-3xl p-5 md:p-6 space-y-4">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 class="text-base font-semibold">持倉與操作指引</h2>
-          <p class="text-xs text-[var(--muted-foreground)]">只買不賣現金流再平衡：虧損部位不殺低，僅針對達標獲利標的減碼換股</p>
+          <h2 id="lbl-hold-title" class="text-base font-semibold">Holdings &amp; Action Guide</h2>
+          <p id="lbl-hold-sub" class="text-xs text-[var(--muted-foreground)]">Buy-only cash-flow rebalancing: trim profitable targets only</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button onclick="toggleEdit()" id="btn-edit" class="glass-sub px-3 py-1.5 rounded-full text-xs font-medium hover:opacity-90 transition">編輯持股</button>
+          <button onclick="toggleEdit()" id="btn-edit" class="glass-sub px-3 py-1.5 rounded-full text-xs font-medium hover:opacity-90 transition">Edit</button>
           <div class="glass-sub rounded-full p-1 inline-flex gap-0.5">
-            <button onclick="setFilter('ALL')"  class="f-btn px-3 py-1 rounded-full text-xs font-medium transition" data-f="ALL">全部</button>
-            <button onclick="setFilter('SELL')" class="f-btn px-3 py-1 rounded-full text-xs font-medium transition" data-f="SELL">待賣</button>
-            <button onclick="setFilter('KEEP')" class="f-btn px-3 py-1 rounded-full text-xs font-medium transition" data-f="KEEP">續抱</button>
+            <button onclick="setFilter('ALL')"  id="flt-all"  class="f-btn px-3 py-1 rounded-full text-xs font-medium transition" data-f="ALL">All</button>
+            <button onclick="setFilter('SELL')" id="flt-sell" class="f-btn px-3 py-1 rounded-full text-xs font-medium transition" data-f="SELL">Sell Watch</button>
+            <button onclick="setFilter('KEEP')" id="flt-keep" class="f-btn px-3 py-1 rounded-full text-xs font-medium transition" data-f="KEEP">Hold</button>
           </div>
         </div>
       </div>
@@ -222,12 +292,12 @@
         <table class="w-full text-left border-collapse text-sm tabular-nums">
           <thead>
             <tr class="border-b border-[var(--glass-border)] text-xs text-[var(--muted-foreground)]">
-              <th class="py-2.5 pr-3 font-medium">標的</th>
-              <th class="py-2.5 px-2 text-right font-medium">股數</th>
-              <th class="py-2.5 px-2 text-right font-medium">成本</th>
-              <th class="py-2.5 px-2 text-right font-medium">現價</th>
-              <th class="py-2.5 px-2 text-right font-medium">損益</th>
-              <th class="py-2.5 pl-3 font-medium">該如何操作</th>
+              <th id="th-asset"  class="py-2.5 pr-3 font-medium">Asset</th>
+              <th id="th-shares" class="py-2.5 px-2 text-right font-medium">Shares</th>
+              <th id="th-cost"   class="py-2.5 px-2 text-right font-medium">Cost</th>
+              <th id="th-price"  class="py-2.5 px-2 text-right font-medium">Price</th>
+              <th id="th-pnl"    class="py-2.5 px-2 text-right font-medium">P&amp;L</th>
+              <th id="th-action" class="py-2.5 pl-3 font-medium">Action</th>
             </tr>
           </thead>
           <tbody id="holdings-tbody" class="divide-y divide-[var(--glass-border)]"></tbody>
@@ -235,19 +305,19 @@
       </div>
     </section>
 
-    <!-- 5. 年年複利計算 -->
+    <!-- 5. Year-by-Year Compounding (Y1-Y10) -->
     <section class="glass rounded-3xl p-5 md:p-6 space-y-5">
       <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div class="space-y-1">
-          <h2 class="text-base font-semibold">年年複利計算（第 1 年 ～ 第 10 年）</h2>
+          <h2 id="lbl-comp-title" class="text-base font-semibold">10-Year Compounding Forecast (Y1 – Y10)</h2>
           <p id="comp-summary" class="text-xs text-[var(--muted-foreground)]">--</p>
         </div>
         <div class="flex flex-wrap items-center gap-3 text-xs tabular-nums">
           <label class="flex items-center gap-1.5 text-[var(--muted-foreground)]">
-            額外啟動金
-            <input id="in-extra" type="number" min="0" max="500" step="1" value="0" oninput="syncExtra(this.value)"
-              class="w-16 text-right glass-sub tint-ring rounded-xl px-2 py-1 font-semibold text-[var(--foreground)]" />
-            <span id="unit-extra">千美元</span>
+            <span id="lbl-extra">Extra Capital</span>
+            <input id="in-extra" type="number" min="0" max="100000000" step="100" value="0" oninput="syncExtra(this.value)"
+              class="w-24 text-right glass-sub tint-ring rounded-xl px-2 py-1 font-semibold text-[var(--foreground)]" />
+            <span id="unit-extra">USD</span>
           </label>
         </div>
       </div>
@@ -255,10 +325,10 @@
       <!-- Minimal Glass SVG Chart -->
       <div class="glass-sub rounded-2xl p-4 space-y-2">
         <div class="flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-          <span id="chart-title">每年年底總資產 vs. 累計總投入本金</span>
+          <span id="chart-title">Projected Assets vs. Cumulative Principal</span>
           <div class="flex gap-4">
-            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background: var(--tint-hex);"></span>總資產</span>
-            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-slate-400/70 inline-block"></span>累計本金</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background: var(--tint-hex);"></span><span id="leg-assets">Total Assets</span></span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-slate-400/70 inline-block"></span><span id="leg-cost">Principal</span></span>
           </div>
         </div>
         <svg id="comp-svg" viewBox="0 0 760 240" class="w-full h-auto"></svg>
@@ -269,11 +339,11 @@
         <table class="w-full text-left border-collapse text-sm tabular-nums">
           <thead>
             <tr class="border-b border-[var(--glass-border)] text-xs text-[var(--muted-foreground)]">
-              <th class="py-2.5 pr-3 font-medium">年份</th>
-              <th class="py-2.5 px-2 text-right font-medium">累計總投入</th>
-              <th class="py-2.5 px-2 text-right font-medium">預估總資產</th>
-              <th class="py-2.5 px-2 text-right font-medium">累計淨利</th>
-              <th class="py-2.5 pl-2 text-right font-medium">當年預估股息 / 每月被動</th>
+              <th id="th-yr"   class="py-2.5 pr-3 font-medium">Year</th>
+              <th id="th-cin"  class="py-2.5 px-2 text-right font-medium">Invested</th>
+              <th id="th-cval" class="py-2.5 px-2 text-right font-medium">Projected Assets</th>
+              <th id="th-cnet" class="py-2.5 px-2 text-right font-medium">Net Gain</th>
+              <th id="th-cdiv" class="py-2.5 pl-2 text-right font-medium">Annual Div / Monthly</th>
             </tr>
           </thead>
           <tbody id="comp-tbody" class="divide-y divide-[var(--glass-border)]"></tbody>
@@ -286,85 +356,378 @@
   <script>
     /*__DATA_START__*/
     const DASHBOARD_DATA = {
-  "storageKey": "snowball_glass_open_v2",
-  "title": "Snowball 全球投資儀表板",
-  "subtitle": "v5 實證多因子 · 只買不賣現金流再平衡",
+  "storageKey": "snowball_glass_open_v4",
+  "defaultLang": "en",
+  "defaultCurrency": "USD",
+  "defaultTint": "blue",
   "priceDate": "demo",
-  "baseCurrency": "USD",
-  "fxUsdTwd": 32.5,
-  "fxToBase": {
+  "fxPerUsd": {
     "USD": 1.0,
-    "TWD": 0.0308,
-    "EUR": 1.08,
-    "JPY": 0.0065,
-    "HKD": 0.128,
-    "GBP": 1.27
+    "TWD": 32.5,
+    "EUR": 0.925,
+    "JPY": 154.0,
+    "HKD": 7.8,
+    "KRW": 1390.0,
+    "GBP": 0.785
   },
   "defaultMonthly": 1000,
+  "defaultMonthlyCurrency": "USD",
   "defaultRate": 8.5,
-  "defaultTint": "blue",
   "coreRatio": 0.6,
-  "coreLabel": "核心 ETF",
-  "tasksTitle": "每週紀律任務清單",
+  "coreLabel": "Core ETF",
   "weeklyOutlook": {
-    "period": "未來一週市場觀察（Global v5）",
-    "posture": "紀律分批 · 逢回加碼不追高",
-    "summary": "全球股債受利率預期與財報輪動影響，短線以區間震盪為主。維持每月固定現金流投入核心全球 ETF，衛星資金優先流向 v5 排名前 20% 且低估值標的。",
+    "period": "Next 7 Days (Global v5)",
+    "posture": "Disciplined DCA · Buy Dips Only",
+    "summary": "Global equities remain range-bound amid rate expectations and earnings rotation. Keep deploying steady monthly cash flow into your core global ETF and top-20% v5 value-momentum leaders.",
     "actions": [
-      {
-        "label": "核心定投",
-        "title": "按表執行每月核心買進",
-        "detail": "將本月 60% 資金固定投入全球核心 ETF，平滑波動並累積複利底倉。"
-      },
-      {
-        "label": "衛星狙擊",
-        "title": "聚焦 v5 前 20% 強勢低估股",
-        "detail": "剩餘 40% 資金從觀察清單中挑選 v5 排名靠前且尚未超重的標的逢回分批買入。"
-      },
-      {
-        "label": "風控紀律",
-        "title": "達標贏家減碼 · 虧損不亂砍",
-        "detail": "僅在單一獲利部位觸及目標賣價或權重超標時獲利了結，回收資金再滾入核心。"
-      }
+      { "label": "Core DCA", "title": "Execute scheduled core buy", "detail": "Deploy 60% of monthly inflow into broad global ETFs to smooth volatility." },
+      { "label": "Satellite", "title": "Focus on top-20% v5 candidates", "detail": "Allocate remaining 40% to underweighted, high-ranking global leaders on pullbacks." },
+      { "label": "Risk Rule", "title": "Trim winners at target only", "detail": "Avoid panic selling drawdowns; rotate profits only when targets or weight caps trigger." }
     ]
   },
   "tasks": [
-    {
-      "id": "t1",
-      "title": "執行本月核心 ETF 定期定額扣款",
-      "desc": "固定投入核心比例資金，維持長期紀律與低交易成本。"
-    },
-    {
-      "id": "t2",
-      "title": "檢視 v5 全球排行榜更新衛星名單",
-      "desc": "透過 global_ranker.py 檢查 US / EU / JP / HK / TW 前 20% 候選標的。"
-    },
-    {
-      "id": "t3",
-      "title": "檢查達標獲利持股是否觸及減碼線",
-      "desc": "遵守只買不賣原則，僅對獲利超重或達目標賣價部位執行獲利換股。"
-    }
+    { "id": "t1", "title": "Complete monthly Core ETF DCA order", "desc": "Deploy core allocation on schedule to maintain low cost and compounding discipline." },
+    { "id": "t2", "title": "Refresh global v5 top-20% watchlist", "desc": "Run global_ranker.py across US, EU, JP, HK, and TW universes." },
+    { "id": "t3", "title": "Check profit-target triggers on sell-watch list", "desc": "Follow buy-only rebalancing and rotate realized gains back into core income." }
   ],
   "holdings": [
-    { "mkt": "US", "currency": "USD", "code": "VT", "name": "Vanguard Total World Stock ETF", "shares": 10, "cost": 115.0, "price": 120.0, "sellList": false, "tag": "加碼", "action": "全球核心底倉，每月固定定期定額" },
-    { "mkt": "US", "currency": "USD", "code": "GOOGL", "name": "Alphabet Inc.", "shares": 2, "cost": 250.0, "price": 280.0, "sellList": false, "tag": "續抱", "action": "美股成長衛星，趨勢穩健續抱" },
-    { "mkt": "TW", "currency": "TWD", "code": "0056", "name": "Yuanta Taiwan High Dividend ETF", "shares": 100, "cost": 40.0, "price": 42.0, "sellList": false, "tag": "加碼", "action": "台股高息核心，定期累積現金流" },
-    { "mkt": "JP", "currency": "JPY", "code": "8306.T", "name": "Mitsubishi UFJ Financial Group", "shares": 100, "cost": 1600.0, "price": 1750.0, "sellList": true, "tag": "待賣", "action": "日股價值衛星：反彈至 ¥2,200 獲利減碼" }
+    { "mkt": "US", "currency": "USD", "code": "VT", "name": "Vanguard Total World Stock ETF", "shares": 10, "cost": 115.0, "price": 120.0, "sellList": false, "tag": "Buy DCA", "action": "Global core holding — regular monthly DCA" },
+    { "mkt": "US", "currency": "USD", "code": "GOOGL", "name": "Alphabet Inc.", "shares": 2, "cost": 250.0, "price": 280.0, "sellList": false, "tag": "Hold", "action": "US mega-cap growth satellite — hold steady" },
+    { "mkt": "TW", "currency": "TWD", "code": "0056", "name": "Yuanta Taiwan High Dividend ETF", "shares": 100, "cost": 40.0, "price": 42.0, "sellList": false, "tag": "Buy DCA", "action": "Taiwan high-dividend income core" },
+    { "mkt": "JP", "currency": "JPY", "code": "8306.T", "name": "Mitsubishi UFJ Financial Group", "shares": 100, "cost": 1600.0, "price": 1750.0, "sellList": true, "tag": "Sell Watch", "action": "Japan bank value satellite — trim profit near ¥2,200" }
   ],
   "screener": []
 };
     /*__DATA_END__*/
 
+    const I18N = {
+      en: {
+        htmlLang: "en",
+        title: "Snowball Global Portfolio",
+        closePrefix: "Close",
+        principle: "v5 Multi-Factor · Buy-Only Rebalancing",
+        settings: "Settings",
+        themeColor: "Theme Color",
+        language: "Language",
+        tints: { red: "Red", orange: "Orange", yellow: "Yellow", green: "Green", blue: "Blue", indigo: "Indigo", violet: "Violet" },
+        kpiCost: "Total Invested",
+        kpiCostSub: amt => `Next 12m inflow: ${amt}`,
+        kpiMv: "Total Assets",
+        kpiPnl: (sign, amt, pct) => `Unrealized P&L ${sign}${amt} (${pct})`,
+        kpiMonthly: "Monthly Contribution",
+        unitMonthlyUsd: "USD/mo",
+        unitMonthlyTwd: "TWD/mo",
+        kpiMonthlySub: (coreLbl, core, sat) => `Core ${coreLbl} ${core} + Satellite ${sat}`,
+        kpiRate: "Expected Annual Return",
+        unitRate: "% / yr",
+        kpiRateSub: pct => `Portfolio return ${pct} · Synced to forecast`,
+        wkTitle: "Next-Week Outlook & Action Plan",
+        tasksTitle: "Action Checklist",
+        tasksSub: "Checked progress is saved locally in your browser",
+        tasksDone: (d, n) => `${d} / ${n} Done`,
+        holdTitle: "Holdings & Action Guide",
+        holdSub: "Buy-only cash-flow rebalancing — trim profitable targets only",
+        edit: "Edit",
+        doneEdit: "Done",
+        fltAll: "All",
+        fltSell: "Sell Watch",
+        fltKeep: "Hold",
+        thAsset: "Asset",
+        thShares: "Shares",
+        thCost: "Cost",
+        thPrice: "Price",
+        thPnl: "P&L",
+        thAction: "Action",
+        tags: { "待賣": "Sell Watch", "加碼": "Buy DCA", "續抱": "Hold", "凍結": "Freeze", "Sell Watch": "Sell Watch", "Buy DCA": "Buy DCA", "Hold": "Hold", "Freeze": "Freeze" },
+        compTitle: "10-Year Compounding Forecast (Y1 – Y10)",
+        extraLabel: "Extra Capital",
+        unitExtraUsd: "k USD",
+        unitExtraTwd: "10k TWD",
+        chartTitleUsd: "Projected Assets vs. Cumulative Principal ($k)",
+        chartTitleTwd: "Projected Assets vs. Cumulative Principal (10k TWD)",
+        legAssets: "Total Assets",
+        legCost: "Principal",
+        thYr: "Year",
+        thCin: "Invested",
+        thCval: "Projected Assets",
+        thCnet: "Net Gain",
+        thCdiv: "Annual Div / Monthly",
+        now: "Now",
+        yrLabel: y => `Year ${y}`,
+        milTag: m => ` ★ ${m}`,
+        compSummary: (mo, rate, milYr, milTxt, y10Txt, divMo) =>
+          `At ${mo}/mo & ${rate}%/yr: ` + (milYr !== null ? `reaches ${milTxt} in Year ${milYr}, ` : "") +
+          `Year 10 projected assets ~${y10Txt} (~${divMo}/mo est. dividend).`
+      },
+      zh: {
+        htmlLang: "zh-Hant",
+        title: "Snowball 全球投資儀表板",
+        closePrefix: "收盤基準",
+        principle: "v5 實證多因子 · 只買不賣現金流再平衡",
+        settings: "設定",
+        themeColor: "主題色調",
+        language: "語言",
+        tints: { red: "紅", orange: "橙", yellow: "黃", green: "綠", blue: "藍", indigo: "靛", violet: "紫" },
+        kpiCost: "總投入金額",
+        kpiCostSub: amt => `未來一年預計投入 ${amt}`,
+        kpiMv: "總資產",
+        kpiPnl: (sign, amt, pct) => `未實現損益 ${sign}${amt} (${pct})`,
+        kpiMonthly: "每月投入金額",
+        unitMonthlyUsd: "USD/月",
+        unitMonthlyTwd: "元/月",
+        kpiMonthlySub: (coreLbl, core, sat) => `核心 ${coreLbl} ${core} ＋ 衛星 ${sat}`,
+        kpiRate: "預估年報酬率",
+        unitRate: "% / 年",
+        kpiRateSub: pct => `目前帳面報酬 ${pct} · 已連動複利試算`,
+        wkTitle: "未來一週行情與操作重點",
+        tasksTitle: "任務清單",
+        tasksSub: "點擊勾選即可自動記憶於本機瀏覽器",
+        tasksDone: (d, n) => `${d} / ${n} 完成`,
+        holdTitle: "持倉與操作指引",
+        holdSub: "只買不賣現金流再平衡：虧損不殺低，達標獲利才減碼換股",
+        edit: "編輯持股",
+        doneEdit: "完成編輯",
+        fltAll: "全部",
+        fltSell: "待賣",
+        fltKeep: "續抱",
+        thAsset: "標的",
+        thShares: "股數",
+        thCost: "成本",
+        thPrice: "現價",
+        thPnl: "損益",
+        thAction: "該如何操作",
+        tags: { "待賣": "待賣", "加碼": "加碼", "續抱": "續抱", "凍結": "凍結", "Sell Watch": "待賣", "Buy DCA": "加碼", "Hold": "續抱", "Freeze": "凍結" },
+        compTitle: "年年複利計算（第 1 年 ～ 第 10 年）",
+        extraLabel: "額外啟動金",
+        unitExtraUsd: "千美元",
+        unitExtraTwd: "萬",
+        chartTitleUsd: "每年年底總資產 vs. 累計總投入本金（千美元）",
+        chartTitleTwd: "每年年底總資產 vs. 累計總投入本金（萬元）",
+        legAssets: "總資產",
+        legCost: "累計本金",
+        thYr: "年份",
+        thCin: "累計總投入",
+        thCval: "預估總資產",
+        thCnet: "累計淨利",
+        thCdiv: "當年預估股息 / 每月被動",
+        now: "現在",
+        yrLabel: y => `第 ${y} 年`,
+        milTag: m => ` ★破${m}`,
+        compSummary: (mo, rate, milYr, milTxt, y10Txt, divMo) =>
+          `以每月投入 ${mo}、年化 ${rate}% 試算：` + (milYr !== null ? `第 ${milYr} 年突破 ${milTxt}，` : "") +
+          `第 10 年總資產約 ${y10Txt}（每月被動股息約 ${divMo}）。`
+      },
+      ja: {
+        htmlLang: "ja",
+        title: "Snowball グローバル投資",
+        closePrefix: "終値基準",
+        principle: "v5 マルチファクター · 積立リバランス",
+        settings: "設定",
+        themeColor: "テーマカラー",
+        language: "言語",
+        tints: { red: "赤", orange: "橙", yellow: "黄", green: "緑", blue: "青", indigo: "藍", violet: "紫" },
+        kpiCost: "総投資額",
+        kpiCostSub: amt => `今後1年の積立予定: ${amt}`,
+        kpiMv: "総資産",
+        kpiPnl: (sign, amt, pct) => `評価損益 ${sign}${amt} (${pct})`,
+        kpiMonthly: "毎月の積立額",
+        unitMonthlyUsd: "USD/月",
+        unitMonthlyTwd: "TWD/月",
+        kpiMonthlySub: (coreLbl, core, sat) => `コア ${coreLbl} ${core} ＋ サテライト ${sat}`,
+        kpiRate: "予想年利回り",
+        unitRate: "% / 年",
+        kpiRateSub: pct => `現在の評価損益率 ${pct} · 複利試算と連動`,
+        wkTitle: "来週の相場見通しとアクション",
+        tasksTitle: "実行タスク",
+        tasksSub: "チェック状態はブラウザに自動保存されます",
+        tasksDone: (d, n) => `${d} / ${n} 完了`,
+        holdTitle: "保有銘柄とアクション指針",
+        holdSub: "含み損は狼狽売りせず、目標到達の利益銘柄のみリバランス",
+        edit: "編集",
+        doneEdit: "完了",
+        fltAll: "すべて",
+        fltSell: "利確監視",
+        fltKeep: "保有継続",
+        thAsset: "銘柄",
+        thShares: "株数",
+        thCost: "取得単価",
+        thPrice: "現在値",
+        thPnl: "損益",
+        thAction: "アクション",
+        tags: { "待賣": "利確監視", "加碼": "積立買付", "續抱": "保有継続", "凍結": "静観", "Sell Watch": "利確監視", "Buy DCA": "積立買付", "Hold": "保有継続", "Freeze": "静観" },
+        compTitle: "10年間 複利シミュレーション（1年目～10年目）",
+        extraLabel: "追加元本",
+        unitExtraUsd: "千USD",
+        unitExtraTwd: "万TWD",
+        chartTitleUsd: "年末総資産 vs. 累計投資元本（千USD）",
+        chartTitleTwd: "年末総資産 vs. 累計投資元本（万TWD）",
+        legAssets: "総資産",
+        legCost: "累計元本",
+        thYr: "年",
+        thCin: "累計投資額",
+        thCval: "予想総資産",
+        thCnet: "累計評価益",
+        thCdiv: "年間配当 / 月間配当",
+        now: "現在",
+        yrLabel: y => `${y}年目`,
+        milTag: m => ` ★${m}突破`,
+        compSummary: (mo, rate, milYr, milTxt, y10Txt, divMo) =>
+          `毎月 ${mo}・年利 ${rate}% の試算：` + (milYr !== null ? `${milYr}年目に ${milTxt} 突破、` : "") +
+          `10年目の予想総資産は約 ${y10Txt}（月間配当目安 ${divMo}）。`
+      },
+      ko: {
+        htmlLang: "ko",
+        title: "Snowball 글로벌 포트폴리오",
+        closePrefix: "종가 기준",
+        principle: "v5 멀티팩터 · 매수 전용 리밸런싱",
+        settings: "설정",
+        themeColor: "테마 색상",
+        language: "언어",
+        tints: { red: "빨강", orange: "주황", yellow: "노랑", green: "초록", blue: "파랑", indigo: "남색", violet: "보라" },
+        kpiCost: "총 투자금액",
+        kpiCostSub: amt => `향후 1년 예정 적립: ${amt}`,
+        kpiMv: "총 자산",
+        kpiPnl: (sign, amt, pct) => `미실현 손익 ${sign}${amt} (${pct})`,
+        kpiMonthly: "월 투자금액",
+        unitMonthlyUsd: "USD/월",
+        unitMonthlyTwd: "TWD/월",
+        kpiMonthlySub: (coreLbl, core, sat) => `코어 ${coreLbl} ${core} + 위성 ${sat}`,
+        kpiRate: "예상 연수익률",
+        unitRate: "% / 년",
+        kpiRateSub: pct => `현재 누적 수익률 ${pct} · 복리 계산 연동`,
+        wkTitle: "향후 1주 시장 전망 및 행동 지침",
+        tasksTitle: "실행 체크리스트",
+        tasksSub: "체크 상태는 브라우저에 자동 저장됩니다",
+        tasksDone: (d, n) => `${d} / ${n} 완료`,
+        holdTitle: "보유 종목 및 대응 전략",
+        holdSub: "손실 종목은 저점 매도 금지 — 목표가 도달 수익 종목만 비중 축소",
+        edit: "편집",
+        doneEdit: "완료",
+        fltAll: "전체",
+        fltSell: "매도 관찰",
+        fltKeep: "보유",
+        thAsset: "종목",
+        thShares: "수량",
+        thCost: "평균단가",
+        thPrice: "현재가",
+        thPnl: "손익",
+        thAction: "대응 전략",
+        tags: { "待賣": "매도 관찰", "加碼": "적립 매수", "續抱": "보유", "凍結": "동결", "Sell Watch": "매도 관찰", "Buy DCA": "적립 매수", "Hold": "보유", "Freeze": "동결" },
+        compTitle: "10년 연도별 복리 계산 (1년차 ~ 10년차)",
+        extraLabel: "추가 초기자금",
+        unitExtraUsd: "천 USD",
+        unitExtraTwd: "만 TWD",
+        chartTitleUsd: "연말 예상 자산 vs. 누적 투자원금 (천 USD)",
+        chartTitleTwd: "연말 예상 자산 vs. 누적 투자원금 (만 TWD)",
+        legAssets: "총 자산",
+        legCost: "누적 원금",
+        thYr: "연차",
+        thCin: "누적 투자금",
+        thCval: "예상 총자산",
+        thCnet: "누적 순이익",
+        thCdiv: "연 배당 / 월 배당",
+        now: "현재",
+        yrLabel: y => `${y}년차`,
+        milTag: m => ` ★${m} 돌파`,
+        compSummary: (mo, rate, milYr, milTxt, y10Txt, divMo) =>
+          `월 ${mo} · 연 ${rate}% 기준: ` + (milYr !== null ? `${milYr}년차 ${milTxt} 돌파, ` : "") +
+          `10년차 예상 자산 약 ${y10Txt} (월 예상 배당 약 ${divMo}).`
+      },
+      de: {
+        htmlLang: "de",
+        title: "Snowball Global Portfolio",
+        closePrefix: "Schlusskurs",
+        principle: "v5 Multifaktor · Buy-Only Rebalancing",
+        settings: "Einstellungen",
+        themeColor: "Akzentfarbe",
+        language: "Sprache",
+        tints: { red: "Rot", orange: "Orange", yellow: "Gelb", green: "Grün", blue: "Blau", indigo: "Indigo", violet: "Violett" },
+        kpiCost: "Gesamtinvestition",
+        kpiCostSub: amt => `Nächste 12M Einzahlung: ${amt}`,
+        kpiMv: "Gesamtvermögen",
+        kpiPnl: (sign, amt, pct) => `Unrealisiert ${sign}${amt} (${pct})`,
+        kpiMonthly: "Monatliche Einzahlung",
+        unitMonthlyUsd: "USD/Mon.",
+        unitMonthlyTwd: "TWD/Mon.",
+        kpiMonthlySub: (coreLbl, core, sat) => `Kern ${coreLbl} ${core} + Satellit ${sat}`,
+        kpiRate: "Erwartete Jahresrendite",
+        unitRate: "% / Jahr",
+        kpiRateSub: pct => `Aktuelle Rendite ${pct} · Mit Zinseszins verknüpft`,
+        wkTitle: "Marktausblick & Aktionsplan (7 Tage)",
+        tasksTitle: "Aufgabenliste",
+        tasksSub: "Fortschritt wird automatisch lokal gespeichert",
+        tasksDone: (d, n) => `${d} / ${n} erledigt`,
+        holdTitle: "Positionen & Handlungsplan",
+        holdSub: "Keine Verlustverkäufe — nur Zielgewinner schrittweise umschichten",
+        edit: "Bearbeiten",
+        doneEdit: "Fertig",
+        fltAll: "Alle",
+        fltSell: "Verkauf beobachten",
+        fltKeep: "Halten",
+        thAsset: "Wertpapier",
+        thShares: "Stück",
+        thCost: "Einstand",
+        thPrice: "Kurs",
+        thPnl: "G/V",
+        thAction: "Aktion",
+        tags: { "待賣": "Verkauf", "加碼": "Sparplan", "續抱": "Halten", "凍結": "Einfrieren", "Sell Watch": "Verkauf", "Buy DCA": "Sparplan", "Hold": "Halten", "Freeze": "Einfrieren" },
+        compTitle: "10-Jahres-Zinseszinsprognose (J1 – J10)",
+        extraLabel: "Startkapital +",
+        unitExtraUsd: "Tsd. USD",
+        unitExtraTwd: "10k TWD",
+        chartTitleUsd: "Prognostiziertes Vermögen vs. Einzahlungen (Tsd. USD)",
+        chartTitleTwd: "Prognostiziertes Vermögen vs. Einzahlungen (10k TWD)",
+        legAssets: "Gesamtvermögen",
+        legCost: "Einzahlungen",
+        thYr: "Jahr",
+        thCin: "Eingezahlt",
+        thCval: "Vermögen",
+        thCnet: "Nettogewinn",
+        thCdiv: "Jahresdiv. / Monatlich",
+        now: "Jetzt",
+        yrLabel: y => `Jahr ${y}`,
+        milTag: m => ` ★ ${m}`,
+        compSummary: (mo, rate, milYr, milTxt, y10Txt, divMo) =>
+          `Bei ${mo}/Mon. & ${rate}%/J.: ` + (milYr !== null ? `${milTxt} in Jahr ${milYr}, ` : "") +
+          `Jahr 10 ca. ${y10Txt} (geschätzte Dividende ~${divMo}/Mon.).`
+      }
+    };
+
     const TINT_HEX = {
       red: "#ef4444", orange: "#f97316", yellow: "#eab308",
       green: "#10b981", blue: "#3b82f6", indigo: "#6366f1", violet: "#a855f7"
     };
-    const CURR_PREFIX = { USD: "$", JPY: "¥", EUR: "€", HKD: "HK$", GBP: "£", TWD: "" };
+    const CURR_PREFIX = { USD: "$", TWD: "NT$", JPY: "¥", EUR: "€", HKD: "HK$", KRW: "₩", GBP: "£" };
+    const CURR_LABELS = {
+      en: { currency: "Currency", perMo: c => `${c}/mo`, chartTitle: (c, u) => `Projected Assets vs. Cumulative Principal (${c}, ${u})` },
+      zh: { currency: "顯示貨幣", perMo: c => `${c}/月`, chartTitle: (c, u) => `每年年底總資產 vs. 累計總投入本金（${c}，單位：${u}）` },
+      ja: { currency: "表示通貨", perMo: c => `${c}/月`, chartTitle: (c, u) => `年末総資産 vs. 累計投資元本（${c}・単位：${u}）` },
+      ko: { currency: "표시 통화", perMo: c => `${c}/월`, chartTitle: (c, u) => `연말 예상 자산 vs. 누적 원금 (${c}, 단위: ${u})` },
+      de: { currency: "Währung", perMo: c => `${c}/Mon.`, chartTitle: (c, u) => `Prognostiziertes Vermögen vs. Einzahlungen (${c}, ${u})` }
+    };
+    const CURRENCY_META = {
+      USD: { symbol: "$",   perUsd: 1.0,    step: 50,    roundUnit: 10,    unitDiv: 1000,    unitLbl: "k", milestone: 100000,    milTxt: "$100k" },
+      TWD: { symbol: "NT$", perUsd: 32.5,   step: 500,   roundUnit: 100,   unitDiv: 10000,   unitLbl: "萬", milestone: 1000000,  milTxt: "NT$1M" },
+      EUR: { symbol: "€",   perUsd: 0.925,  step: 50,    roundUnit: 10,    unitDiv: 1000,    unitLbl: "k", milestone: 100000,    milTxt: "€100k" },
+      JPY: { symbol: "¥",   perUsd: 154.0,  step: 5000,  roundUnit: 1000,  unitDiv: 10000,   unitLbl: "万", milestone: 10000000, milTxt: "¥10M" },
+      HKD: { symbol: "HK$", perUsd: 7.8,    step: 500,   roundUnit: 100,   unitDiv: 1000,    unitLbl: "k", milestone: 1000000,   milTxt: "HK$1M" },
+      KRW: { symbol: "₩",   perUsd: 1390.0, step: 50000, roundUnit: 10000, unitDiv: 1000000, unitLbl: "M", milestone: 100000000, milTxt: "₩100M" }
+    };
 
+    function perUsdRate(code) {
+      const c = (code || "USD").toUpperCase();
+      const map = DASHBOARD_DATA.fxPerUsd || {};
+      if (typeof map[c] === "number" && map[c] > 0) return map[c];
+      return CURRENCY_META[c] ? CURRENCY_META[c].perUsd : 1.0;
+    }
+
+    const _initMonthlyCur = (DASHBOARD_DATA.defaultMonthlyCurrency || DASHBOARD_DATA.defaultCurrency || "USD").toUpperCase();
     let state = {
+      lang: DASHBOARD_DATA.defaultLang || "en",
+      currency: (DASHBOARD_DATA.defaultCurrency || "USD").toUpperCase(),
       tint: DASHBOARD_DATA.defaultTint || "blue",
-      monthly: DASHBOARD_DATA.defaultMonthly,
-      extra: 0,
+      monthlyUsd: (DASHBOARD_DATA.defaultMonthly || 1000) / perUsdRate(_initMonthlyCur),
+      extraUsd: 0,
       rate: DASHBOARD_DATA.defaultRate || 8.5,
       filter: "ALL",
       editMode: false,
@@ -372,18 +735,17 @@
       holdings: JSON.parse(JSON.stringify(DASHBOARD_DATA.holdings || []))
     };
 
-    function isUsdBase() {
-      return (DASHBOARD_DATA.baseCurrency || "TWD").toUpperCase() === "USD";
+    function L() { return I18N[state.lang] || I18N.en; }
+    function CL() { return CURR_LABELS[state.lang] || CURR_LABELS.en; }
+    function CM() { return CURRENCY_META[state.currency] || CURRENCY_META.USD; }
+    function curRate() { return perUsdRate(state.currency); }
+    function fmtDisplay(amt) {
+      const sym = CM().symbol;
+      return `${sym}${Math.round(amt).toLocaleString()}`;
     }
-    function fmtBase(n) {
-      const r = Math.round(n).toLocaleString();
-      return isUsdBase() ? `$${r}` : `${r} 元`;
-    }
-    function fxFor(h) {
-      const map = DASHBOARD_DATA.fxToBase || {};
-      const c = (h.currency || (h.mkt === "US" ? "USD" : h.mkt === "JP" ? "JPY" : h.mkt === "EU" ? "EUR" : h.mkt === "HK" ? "HKD" : "TWD")).toUpperCase();
-      if (typeof map[c] === "number") return map[c];
-      return h.mkt === "US" ? (DASHBOARD_DATA.fxUsdTwd || 32.5) : 1;
+    function holdingToDisplay(amount, h) {
+      const hc = (h.currency || (h.mkt === "US" ? "USD" : h.mkt === "JP" ? "JPY" : h.mkt === "EU" ? "EUR" : h.mkt === "HK" ? "HKD" : "TWD")).toUpperCase();
+      return (amount / perUsdRate(hc)) * curRate();
     }
 
     function loadState() {
@@ -391,9 +753,11 @@
         const raw = localStorage.getItem(DASHBOARD_DATA.storageKey);
         if (!raw) return;
         const s = JSON.parse(raw);
+        if (s.lang && I18N[s.lang]) state.lang = s.lang;
+        if (s.currency && CURRENCY_META[s.currency]) state.currency = s.currency;
         if (s.tint && TINT_HEX[s.tint]) state.tint = s.tint;
-        if (typeof s.monthly === "number") state.monthly = s.monthly;
-        if (typeof s.extra === "number") state.extra = s.extra;
+        if (typeof s.monthlyUsd === "number") state.monthlyUsd = s.monthlyUsd;
+        if (typeof s.extraUsd === "number") state.extraUsd = s.extraUsd;
         if (typeof s.rate === "number") state.rate = s.rate;
         if (s.doneTasks) state.doneTasks = s.doneTasks;
         if (Array.isArray(s.holdings)) {
@@ -409,9 +773,11 @@
     function saveState() {
       try {
         localStorage.setItem(DASHBOARD_DATA.storageKey, JSON.stringify({
+          lang: state.lang,
+          currency: state.currency,
           tint: state.tint,
-          monthly: state.monthly,
-          extra: state.extra,
+          monthlyUsd: state.monthlyUsd,
+          extraUsd: state.extraUsd,
           rate: state.rate,
           doneTasks: state.doneTasks,
           holdings: state.holdings.map(h => ({ code: h.code, shares: h.shares, cost: h.cost }))
@@ -419,12 +785,34 @@
       } catch (e) {}
     }
 
+    function toggleSettings(e) {
+      if (e) e.stopPropagation();
+      const panel = document.getElementById("settings-panel");
+      const btn = document.getElementById("btn-settings");
+      const open = panel.classList.toggle("hidden") === false;
+      btn.setAttribute("aria-expanded", String(open));
+    }
+
+    document.addEventListener("click", e => {
+      const wrap = document.getElementById("settings-wrap");
+      const panel = document.getElementById("settings-panel");
+      if (wrap && panel && !panel.classList.contains("hidden") && !wrap.contains(e.target)) {
+        panel.classList.add("hidden");
+        document.getElementById("btn-settings").setAttribute("aria-expanded", "false");
+      }
+    });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") {
+        document.getElementById("settings-panel").classList.add("hidden");
+        document.getElementById("btn-settings").setAttribute("aria-expanded", "false");
+      }
+    });
+
     function totals() {
       let cost = 0, mv = 0;
       state.holdings.forEach(h => {
-        const fx = fxFor(h);
-        cost += h.shares * h.cost * fx;
-        mv += h.shares * h.price * fx;
+        cost += holdingToDisplay(h.shares * h.cost, h);
+        mv += holdingToDisplay(h.shares * h.price, h);
       });
       return { cost, mv, pnl: mv - cost, pct: cost > 0 ? (mv / cost - 1) * 100 : 0 };
     }
@@ -437,32 +825,118 @@
         const el = document.getElementById("sw-" + k);
         if (el) el.classList.toggle("active", k === tint);
       });
+      document.getElementById("lbl-active-tint").textContent = L().tints[tint] || tint;
       saveState();
       renderCompounding();
     }
 
+    function setCurrency(cur) {
+      const code = (cur || "USD").toUpperCase();
+      if (!CURRENCY_META[code]) return;
+      state.currency = code;
+      Object.keys(CURRENCY_META).forEach(c => {
+        const el = document.getElementById("cur-" + c);
+        if (el) {
+          el.className = c === code
+            ? "cur-btn px-2.5 py-1.5 rounded-xl text-xs font-semibold tint-btn-active transition text-center"
+            : "cur-btn px-2.5 py-1.5 rounded-xl text-xs font-medium glass-sub text-[var(--foreground)] hover:opacity-90 transition text-center";
+        }
+      });
+      const mIn = document.getElementById("in-monthly");
+      const eIn = document.getElementById("in-extra");
+      mIn.step = CM().step;
+      mIn.value = Math.round(state.monthlyUsd * curRate());
+      eIn.step = CM().step;
+      eIn.value = Math.round(state.extraUsd * curRate());
+      saveState();
+      renderKPIs();
+      renderCompounding();
+    }
+
+    function setLang(lang) {
+      if (!I18N[lang]) return;
+      state.lang = lang;
+      document.documentElement.lang = L().htmlLang;
+      Object.keys(I18N).forEach(code => {
+        const el = document.getElementById("lang-" + code);
+        if (el) {
+          el.className = code === lang
+            ? "lang-btn px-3 py-1.5 rounded-xl text-xs font-semibold tint-btn-active transition text-left" + (code === "de" ? " col-span-2" : "")
+            : "lang-btn px-3 py-1.5 rounded-xl text-xs font-medium glass-sub text-[var(--foreground)] hover:opacity-90 transition text-left" + (code === "de" ? " col-span-2" : "");
+        }
+      });
+      saveState();
+      applyLocaleStrings();
+      renderKPIs();
+      renderWeeklyOutlook();
+      renderTasks();
+      renderHoldings();
+      renderCompounding();
+    }
+
+    function applyLocaleStrings() {
+      const tr = L();
+      document.getElementById("lbl-settings").textContent = tr.settings;
+      document.getElementById("lbl-theme-color").textContent = tr.themeColor;
+      document.getElementById("lbl-active-tint").textContent = tr.tints[state.tint] || state.tint;
+      document.getElementById("lbl-language").textContent = tr.language;
+      document.getElementById("lbl-currency").textContent = CL().currency;
+      document.getElementById("lbl-kpi-cost").textContent = tr.kpiCost;
+      document.getElementById("lbl-kpi-mv").textContent = tr.kpiMv;
+      document.getElementById("lbl-kpi-monthly").textContent = tr.kpiMonthly;
+      document.getElementById("lbl-kpi-rate").textContent = tr.kpiRate;
+      document.getElementById("unit-rate").textContent = tr.unitRate;
+      document.getElementById("lbl-wk-title").textContent = tr.wkTitle;
+      document.getElementById("tasks-title").textContent = tr.tasksTitle;
+      document.getElementById("lbl-tasks-sub").textContent = tr.tasksSub;
+      document.getElementById("lbl-hold-title").textContent = tr.holdTitle;
+      document.getElementById("lbl-hold-sub").textContent = tr.holdSub;
+      document.getElementById("btn-edit").textContent = state.editMode ? tr.doneEdit : tr.edit;
+      document.getElementById("flt-all").textContent = tr.fltAll;
+      document.getElementById("flt-sell").textContent = tr.fltSell;
+      document.getElementById("flt-keep").textContent = tr.fltKeep;
+      document.getElementById("th-asset").textContent = tr.thAsset;
+      document.getElementById("th-shares").textContent = tr.thShares;
+      document.getElementById("th-cost").textContent = tr.thCost;
+      document.getElementById("th-price").textContent = tr.thPrice;
+      document.getElementById("th-pnl").textContent = tr.thPnl;
+      document.getElementById("th-action").textContent = tr.thAction;
+      document.getElementById("lbl-comp-title").textContent = tr.compTitle;
+      document.getElementById("lbl-extra").textContent = tr.extraLabel;
+      document.getElementById("leg-assets").textContent = tr.legAssets;
+      document.getElementById("leg-cost").textContent = tr.legCost;
+      document.getElementById("th-yr").textContent = tr.thYr;
+      document.getElementById("th-cin").textContent = tr.thCin;
+      document.getElementById("th-cval").textContent = tr.thCval;
+      document.getElementById("th-cnet").textContent = tr.thCnet;
+      document.getElementById("th-cdiv").textContent = tr.thCdiv;
+    }
+
     function renderKPIs() {
       const t = totals();
-      document.getElementById("hdr-title").textContent = DASHBOARD_DATA.title || "Snowball 全球投資儀表板";
-      document.getElementById("hdr-sub").textContent = `收盤基準 ${DASHBOARD_DATA.priceDate} · ${DASHBOARD_DATA.subtitle || "極簡毛玻璃版"}`;
-      document.getElementById("unit-monthly").textContent = isUsdBase() ? "USD/月" : "元/月";
-      document.getElementById("unit-extra").textContent = isUsdBase() ? "千美元" : "萬";
+      const tr = L();
+      const monthlyDisp = state.monthlyUsd * curRate();
+      document.getElementById("hdr-title").textContent = tr.title;
+      document.getElementById("hdr-sub").textContent = `${tr.closePrefix} ${DASHBOARD_DATA.priceDate} · ${tr.principle}`;
+      document.getElementById("unit-monthly").textContent = CL().perMo(state.currency);
+      document.getElementById("unit-extra").textContent = state.currency;
 
-      document.getElementById("kpi-cost").textContent = fmtBase(t.cost);
-      document.getElementById("kpi-cost-sub").textContent = `未來一年將再投入 ${fmtBase(state.monthly * 12)}`;
-      document.getElementById("kpi-mv").textContent = fmtBase(t.mv);
+      document.getElementById("kpi-cost").textContent = fmtDisplay(t.cost);
+      document.getElementById("kpi-cost-sub").textContent = tr.kpiCostSub(fmtDisplay(monthlyDisp * 12));
+      document.getElementById("kpi-mv").textContent = fmtDisplay(t.mv);
 
       const pnlEl = document.getElementById("kpi-pnl");
       const sign = t.pnl >= 0 ? "+" : "-";
-      pnlEl.textContent = `未實現損益 ${sign}${fmtBase(Math.abs(t.pnl))} (${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(1)}%)`;
+      const pctStr = `${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(1)}%`;
+      pnlEl.textContent = tr.kpiPnl(sign, fmtDisplay(Math.abs(t.pnl)), pctStr);
       pnlEl.className = `text-xs font-medium ${t.pnl >= 0 ? "text-emerald-500" : "text-rose-500"}`;
 
       const ratio = typeof DASHBOARD_DATA.coreRatio === "number" ? DASHBOARD_DATA.coreRatio : 0.6;
-      const roundUnit = isUsdBase() ? 10 : 100;
-      const core = Math.round(state.monthly * ratio / roundUnit) * roundUnit;
-      const sat = Math.max(0, state.monthly - core);
-      document.getElementById("kpi-monthly-sub").textContent = `${DASHBOARD_DATA.coreLabel || "核心"} ${fmtBase(core)} ＋ 衛星 ${fmtBase(sat)}`;
-      document.getElementById("kpi-rate-sub").textContent = `目前帳面累計報酬 ${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(1)}% · 已連動複利試算`;
+      const ru = CM().roundUnit;
+      const core = Math.round(monthlyDisp * ratio / ru) * ru;
+      const sat = Math.max(0, monthlyDisp - core);
+      document.getElementById("kpi-monthly-sub").textContent = tr.kpiMonthlySub(DASHBOARD_DATA.coreLabel || "ETF", fmtDisplay(core), fmtDisplay(sat));
+      document.getElementById("kpi-rate-sub").textContent = tr.kpiRateSub(pctStr);
     }
 
     function renderWeeklyOutlook() {
@@ -487,10 +961,10 @@
     }
 
     function renderTasks() {
-      document.getElementById("tasks-title").textContent = DASHBOARD_DATA.tasksTitle || "執行任務清單";
+      const tr = L();
       const tasks = DASHBOARD_DATA.tasks || [];
       const doneCount = tasks.filter(t => state.doneTasks[t.id]).length;
-      document.getElementById("task-counter").textContent = `${doneCount} / ${tasks.length} 完成`;
+      document.getElementById("task-counter").textContent = tr.tasksDone(doneCount, tasks.length);
       document.getElementById("tasks-list").innerHTML = tasks.map(t => {
         const checked = !!state.doneTasks[t.id];
         return `
@@ -518,7 +992,7 @@
     function toggleEdit() {
       state.editMode = !state.editMode;
       const b = document.getElementById("btn-edit");
-      b.textContent = state.editMode ? "完成編輯" : "編輯持股";
+      b.textContent = state.editMode ? L().doneEdit : L().edit;
       b.className = state.editMode
         ? "px-3 py-1.5 rounded-full text-xs font-semibold tint-btn-active transition"
         : "glass-sub px-3 py-1.5 rounded-full text-xs font-medium hover:opacity-90 transition";
@@ -535,6 +1009,7 @@
     }
 
     function renderHoldings() {
+      const tr = L();
       const rows = state.holdings.filter(h => {
         if (state.filter === "SELL") return h.sellList;
         if (state.filter === "KEEP") return !h.sellList;
@@ -542,20 +1017,25 @@
       });
       const tagColor = {
         "待賣": "bg-amber-500/15 text-amber-500",
+        "Sell Watch": "bg-amber-500/15 text-amber-500",
         "加碼": "tint-bg-soft",
+        "Buy DCA": "tint-bg-soft",
         "續抱": "bg-sky-500/15 text-sky-500",
-        "凍結": "glass-sub text-[var(--muted-foreground)]"
+        "Hold": "bg-sky-500/15 text-sky-500",
+        "凍結": "glass-sub text-[var(--muted-foreground)]",
+        "Freeze": "glass-sub text-[var(--muted-foreground)]"
       };
       document.getElementById("holdings-tbody").innerHTML = rows.map(h => {
         const pct = h.cost > 0 ? (h.price / h.cost - 1) * 100 : 0;
         const currCode = (h.currency || (h.mkt === "US" ? "USD" : h.mkt === "JP" ? "JPY" : h.mkt === "EU" ? "EUR" : h.mkt === "HK" ? "HKD" : "TWD")).toUpperCase();
-        const curr = CURR_PREFIX[currCode] ?? "";
+        const curr = currCode === "TWD" ? "NT$" : (CURR_PREFIX[currCode] ?? "");
         const shCell = state.editMode
           ? `<input type="number" step="any" value="${h.shares}" onchange="editHold('${h.code}','shares',this.value)" class="w-20 text-right glass-sub tint-ring rounded-lg px-1.5 py-0.5 text-xs" />`
           : `${h.shares}`;
         const cCell = state.editMode
           ? `<input type="number" step="0.01" value="${h.cost}" onchange="editHold('${h.code}','cost',this.value)" class="w-20 text-right glass-sub tint-ring rounded-lg px-1.5 py-0.5 text-xs" />`
           : `${curr}${h.cost.toFixed(2)}`;
+        const tagText = tr.tags[h.tag] || h.tag;
         return `
           <tr class="hover:bg-[var(--glass-sub)] transition">
             <td class="py-3 pr-3"><div class="font-semibold">${h.code} ${h.name}</div><div class="text-xs text-[var(--muted-foreground)]">${h.mkt}</div></td>
@@ -564,7 +1044,7 @@
             <td class="py-3 px-2 text-right font-medium">${curr}${h.price.toFixed(2)}</td>
             <td class="py-3 px-2 text-right font-semibold ${pct >= 0 ? "text-emerald-500" : "text-rose-500"}">${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</td>
             <td class="py-3 pl-3">
-              <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium mr-1.5 ${tagColor[h.tag] || tagColor["凍結"]}">${h.tag}</span>
+              <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium mr-1.5 ${tagColor[h.tag] || tagColor["凍結"]}">${tagText}</span>
               <span class="text-xs text-[var(--muted-foreground)]">${h.action}</span>
             </td>
           </tr>
@@ -573,13 +1053,15 @@
     }
 
     function syncMonthly(v) {
-      state.monthly = Math.max(0, Number(v) || 0);
+      const disp = Math.max(0, Number(v) || 0);
+      state.monthlyUsd = disp / curRate();
       saveState();
       renderKPIs();
       renderCompounding();
     }
     function syncExtra(v) {
-      state.extra = Math.max(0, Number(v) || 0);
+      const disp = Math.max(0, Number(v) || 0);
+      state.extraUsd = disp / curRate();
       saveState();
       renderCompounding();
     }
@@ -591,56 +1073,56 @@
     }
 
     function renderCompounding() {
+      const tr = L();
+      const cm = CM();
       const t = totals();
-      const usd = isUsdBase();
-      const unitDiv = usd ? 1000 : 10000;
-      const unitLabel = usd ? "k" : "萬";
-      const milestone = usd ? 100000 : 1000000;
-      const milestoneText = usd ? "$100k" : "100萬";
+      const unitDiv = cm.unitDiv;
+      const unitLabel = cm.unitLbl;
+      const milestone = cm.milestone;
+      const milestoneText = cm.milTxt;
 
-      const extraBase = state.extra * unitDiv;
-      const annualIn = state.monthly * 12;
+      const monthlyDisp = state.monthlyUsd * curRate();
+      const extraDisp = state.extraUsd * curRate();
+      const annualIn = monthlyDisp * 12;
       const r = state.rate / 100;
       const divYield = state.rate <= 9 ? 0.055 : 0.04;
 
-      let val = t.mv + extraBase;
-      let cost = t.cost + extraBase;
-      const series = [{ y: 0, label: "現在", cost, val, div: val * divYield }];
+      let val = t.mv + extraDisp;
+      let cost = t.cost + extraDisp;
+      const series = [{ y: 0, label: tr.now, cost, val, div: val * divYield }];
       let milYr = val >= milestone ? 0 : null;
 
       for (let y = 1; y <= 10; y++) {
         val = val * (1 + r) + annualIn * (1 + r * 0.5);
         cost += annualIn;
         if (milYr === null && val >= milestone) milYr = y;
-        series.push({ y, label: `第 ${y} 年`, cost, val, div: val * divYield });
+        series.push({ y, label: tr.yrLabel(y), cost, val, div: val * divYield });
       }
 
       const y10 = series[10];
-      document.getElementById("chart-title").textContent = usd
-        ? "每年年底總資產 vs. 累計總投入本金（千美元）"
-        : "每年年底總資產 vs. 累計總投入本金（萬元）";
-      document.getElementById("comp-summary").textContent =
-        `以每月投入 ${fmtBase(state.monthly)}、年化 ${state.rate.toFixed(1)}% 試算：` +
-        (milYr !== null ? `第 ${milYr} 年突破 ${milestoneText}，` : "") +
-        `第 10 年總資產約 ${usd ? "$" : ""}${(y10.val / unitDiv).toFixed(1)}${unitLabel}（每月被動股息約 ${fmtBase(y10.div / 12)}）。`;
+      const y10Txt = fmtDisplay(y10.val);
+      document.getElementById("chart-title").textContent = CL().chartTitle(state.currency, unitLabel);
+      document.getElementById("comp-summary").textContent = tr.compSummary(
+        fmtDisplay(monthlyDisp), state.rate.toFixed(1), milYr, milestoneText, y10Txt, fmtDisplay(y10.div / 12)
+      );
 
       document.getElementById("comp-tbody").innerHTML = series.slice(1).map(d => {
         const net = d.val - d.cost;
         const isMil = d.y === milYr;
         return `
           <tr class="${isMil ? "font-semibold" : "hover:bg-[var(--glass-sub)]"} transition" style="${isMil ? "background: rgba(var(--tint-rgb), 0.12);" : ""}">
-            <td class="py-2.5 pr-3">${d.label}${isMil ? ` ★破${milestoneText}` : ""}</td>
-            <td class="py-2.5 px-2 text-right text-[var(--muted-foreground)]">${fmtBase(d.cost)}</td>
-            <td class="py-2.5 px-2 text-right font-semibold">${fmtBase(d.val)}</td>
-            <td class="py-2.5 px-2 text-right ${net >= 0 ? "text-emerald-500" : "text-rose-500"}">${net >= 0 ? "+" : "-"}${fmtBase(Math.abs(net))}</td>
-            <td class="py-2.5 pl-2 text-right text-[var(--muted-foreground)]">${fmtBase(d.div)} / <span class="tint-text font-medium">${fmtBase(d.div / 12)}</span></td>
+            <td class="py-2.5 pr-3">${d.label}${isMil ? tr.milTag(milestoneText) : ""}</td>
+            <td class="py-2.5 px-2 text-right text-[var(--muted-foreground)]">${fmtDisplay(d.cost)}</td>
+            <td class="py-2.5 px-2 text-right font-semibold">${fmtDisplay(d.val)}</td>
+            <td class="py-2.5 px-2 text-right ${net >= 0 ? "text-emerald-500" : "text-rose-500"}">${net >= 0 ? "+" : "-"}${fmtDisplay(Math.abs(net))}</td>
+            <td class="py-2.5 pl-2 text-right text-[var(--muted-foreground)]">${fmtDisplay(d.div)} / <span class="tint-text font-medium">${fmtDisplay(d.div / 12)}</span></td>
           </tr>
         `;
       }).join("");
 
       const svg = document.getElementById("comp-svg");
       const maxV = Math.max(milestone * 0.15, ...series.map(d => d.val)) * 1.15;
-      const W = 760, H = 240, pL = 52, pR = 16, pT = 22, pB = 28;
+      const W = 760, H = 240, pL = 62, pR = 16, pT = 22, pB = 28;
       const plotW = W - pL - pR, plotH = H - pT - pB;
       const step = plotW / series.length;
       const accentHex = TINT_HEX[state.tint] || "#3b82f6";
@@ -664,21 +1146,17 @@
         out += `<rect x="${cx - bw - 1}" y="${pT + plotH - hC}" width="${bw}" height="${hC}" rx="5" fill="#94a3b8" opacity="0.45" />`;
         out += `<rect x="${cx + 1}" y="${pT + plotH - hV}" width="${bw}" height="${hV}" rx="5" fill="${accentHex}" opacity="0.88" />`;
         out += `<text x="${cx}" y="${pT + plotH - hV - 5}" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.8">${(d.val / unitDiv).toFixed(0)}</text>`;
-        out += `<text x="${cx}" y="${H - 6}" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.6">${d.y === 0 ? "現在" : "Y" + d.y}</text>`;
+        out += `<text x="${cx}" y="${H - 6}" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.6">${d.y === 0 ? tr.now : "Y" + d.y}</text>`;
       });
       svg.innerHTML = out;
     }
 
     function init() {
-      setTint(state.tint);
-      document.getElementById("in-monthly").value = state.monthly;
-      document.getElementById("in-extra").value = state.extra;
       document.getElementById("in-rate").value = state.rate;
+      setTint(state.tint);
+      setCurrency(state.currency);
+      setLang(state.lang);
       setFilter(state.filter);
-      renderKPIs();
-      renderWeeklyOutlook();
-      renderTasks();
-      renderCompounding();
     }
 
     loadState();

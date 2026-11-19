@@ -64,6 +64,13 @@ def test_dashboard_template_and_injection():
     assert "backdrop-filter" in html
     assert "setTheme(" not in html
     assert "resetAll(" not in html
+    assert 'id="btn-settings"' in html
+    assert '"defaultLang": "en"' in html
+    assert '"defaultCurrency": "USD"' in html
+    for lang in ("en", "zh", "ja", "ko", "de"):
+        assert f"setLang('{lang}')" in html
+    for cur in ("USD", "TWD", "EUR", "JPY", "HKD", "KRW"):
+        assert f"setCurrency('{cur}')" in html
     for tint in ("red", "orange", "yellow", "green", "blue", "indigo", "violet"):
         assert f'data-tint="{tint}"' in html
         assert f"setTint('{tint}')" in html
@@ -83,6 +90,8 @@ def test_generate_dashboard_offline_end_to_end(tmp_path):
     assert len(payload["screener"]) == len(cfg["watchlist"])
     assert "weeklyOutlook" in payload and len(payload["weeklyOutlook"]["actions"]) == 3
     assert payload["defaultTint"] == "blue"
+    assert payload["defaultLang"] == "en"
+    assert payload["defaultCurrency"] == "USD"
 
     out_file = tmp_path / "out.html"
     html = gd.TEMPLATE_HTML.read_text(encoding="utf-8")

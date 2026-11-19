@@ -41,6 +41,7 @@ STANDALONE_THEME_CSS = """
       --primary-foreground: #0f172a;
       --glass-bg: rgba(17, 24, 39, 0.54);
       --glass-sub: rgba(30, 41, 59, 0.44);
+      --glass-pop: rgba(17, 24, 39, 0.88);
       --glass-border: rgba(255, 255, 255, 0.13);
       --glass-highlight: rgba(255, 255, 255, 0.08);
       --orb-opacity: 0.26;
@@ -57,6 +58,7 @@ STANDALONE_THEME_CSS = """
         --primary-foreground: #ffffff;
         --glass-bg: rgba(255, 255, 255, 0.62);
         --glass-sub: rgba(255, 255, 255, 0.46);
+        --glass-pop: rgba(255, 255, 255, 0.90);
         --glass-border: rgba(255, 255, 255, 0.72);
         --glass-highlight: rgba(255, 255, 255, 0.85);
         --orb-opacity: 0.28;
@@ -82,12 +84,12 @@ def _derive_tag_and_action(h: dict, price: float) -> tuple[bool, str, str]:
     role = str(h.get("role", "hold")).lower()
     note = str(h.get("note", "")).strip()
     if target is not None:
-        return True, "待賣", note or f"反彈至目標價 {target} 獲利減碼"
+        return True, "Sell Watch", note or f"Trim profit near target {target}"
     if role == "core_dca":
-        return False, "加碼", note or "核心標的：每月固定定期定額買進"
+        return False, "Buy DCA", note or "Core holding — regular monthly DCA"
     if role == "frozen":
-        return False, "凍結", note or "不賣也不加碼，靜待回穩"
-    return False, "續抱", note or ("帳面正報酬，原地續抱觀察" if price >= float(h["cost"]) else "原地續抱領息觀察")
+        return False, "Freeze", note or "No new adds — hold steady"
+    return False, "Hold", note or ("In profit — hold steady" if price >= float(h["cost"]) else "Hold and monitor")
 
 
 def build_payload(cfg: dict, offline: bool = False) -> dict:
@@ -164,41 +166,44 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
                 "v5": round(1.5 - idx * 0.2, 3),
             })
 
-    base_currency = str(cfg.get("base_currency", "TWD")).upper()
-    fx_to_base = cfg.get("fx_rates_to_base")
-    if not isinstance(fx_to_base, dict):
-        fx_to_base = (
-            {"USD": 1.0, "TWD": 0.0308, "EUR": 1.08, "JPY": 0.0065, "HKD": 0.128, "GBP": 1.27}
-            if base_currency == "USD"
-            else {"TWD": 1.0, "USD": float(cfg.get("currency_fx_usd_twd", 32.5)), "EUR": 35.1, "JPY": 0.21, "HKD": 4.16, "GBP": 41.2}
-        )
+    default_currency = str(cfg.get("default_currency", cfg.get("base_currency", "USD"))).upper()
+    fx_per_usd = cfg.get("fx_per_usd") or {
+        "USD": 1.0,
+        "TWD": float(cfg.get("currency_fx_usd_twd", 32.5)),
+        "EUR": 0.925,
+        "JPY": 154.0,
+        "HKD": 7.8,
+        "KRW": 1390.0,
+        "GBP": 0.785,
+    }
 
-    default_monthly = int(cfg.get("monthly_inflow", cfg.get("monthly_inflow_twd", 10000)))
+    default_monthly = int(cfg.get("monthly_inflow", cfg.get("monthly_inflow_twd", 1000)))
+    default_monthly_cur = "USD" if "monthly_inflow" in cfg else ("TWD" if "monthly_inflow_twd" in cfg else default_currency)
     core_ratio = float(cfg.get("core_ratio_pct", 60)) / 100.0
     top_sat = screener_out[0]["code"] if screener_out else "VT"
 
     weekly_outlook = cfg.get("weekly_outlook") or {
-        "period": f"未來一週觀察（基準日 {latest_daily_dt}）",
-        "posture": "紀律分批 · 逢回加碼不追高",
+        "period": f"Next 7 Days (Close {latest_daily_dt})",
+        "posture": "Disciplined DCA · Buy Dips Only",
         "summary": (
-            f"維持核心定投與只買不賣現金流再平衡；目前衛星觀察榜首為 {top_sat}。"
-            "未來一週若市場震盪回測，優先以每月新現金流分批補齊低估值與低權重標的。"
+            f"Keep deploying scheduled cash flow into core ETFs while monitoring top v5 satellite candidate {top_sat}. "
+            "Use pullbacks to build underweighted top-20% positions and avoid chasing short-term rallies."
         ),
         "actions": [
             {
-                "label": "核心定投",
-                "title": "按表執行每月核心買進",
-                "detail": f"將每月 {int(round(core_ratio * 100))}% 資金固定投入核心 ETF，平滑波動並累積複利底倉。",
+                "label": "Core DCA",
+                "title": "Execute scheduled core buy",
+                "detail": f"Deploy {int(round(core_ratio * 100))}% of monthly inflow into core ETFs to smooth volatility.",
             },
             {
-                "label": "衛星狙擊",
-                "title": f"優先追蹤 {top_sat} 與前 20% 強勢股",
-                "detail": "剩餘衛星資金優先流向 v5 排名靠前且估值合理之標的，分批逢低切入。",
+                "label": "Satellite",
+                "title": f"Track {top_sat} & top-20% leaders",
+                "detail": "Direct remaining satellite funds to high-scoring, attractively valued global leaders on dips.",
             },
             {
-                "label": "風控紀律",
-                "title": "達標贏家減碼 · 虧損不亂砍",
-                "detail": "僅在單一獲利持股觸及目標賣價或權重超標時減碼換股，絕不在低檔認賠。",
+                "label": "Risk Rule",
+                "title": "Trim winners at target only",
+                "detail": "Never panic sell drawdowns; rotate profits only when targets or weight caps trigger.",
             },
         ],
     }
@@ -206,35 +211,33 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
     tasks = cfg.get("tasks") or [
         {
             "id": "t1",
-            "title": "按表執行本月核心 ETF 定期定額扣款",
-            "desc": "固定投入核心比例資金，維持長期紀律與低交易成本。",
+            "title": "Complete monthly Core ETF DCA order",
+            "desc": "Deploy core allocation on schedule to maintain low cost and compounding discipline.",
         },
         {
             "id": "t2",
-            "title": f"追蹤衛星候選 {top_sat} 與觀察名單進場區間",
-            "desc": "搭配 global_ranker.py 定期更新全球多因子排名。",
+            "title": f"Review satellite candidate {top_sat} & global v5 rankings",
+            "desc": "Run global_ranker.py across US, EU, JP, HK, and TW universes.",
         },
         {
             "id": "t3",
-            "title": "檢查待賣清單是否觸及目標獲利價",
-            "desc": "遵守只買不賣現金流規則，獲利達標再換股轉入核心池。",
+            "title": "Check profit-target triggers on sell-watch list",
+            "desc": "Follow buy-only cash-flow rebalancing and rotate realized gains into core holdings.",
         },
     ]
 
     return {
-        "storageKey": "snowball_glass_open_v2",
-        "title": cfg.get("title", "Snowball 全球投資儀表板"),
-        "subtitle": cfg.get("subtitle", "v5 實證多因子 · 只買不賣現金流再平衡"),
-        "priceDate": latest_daily_dt,
-        "baseCurrency": base_currency,
-        "fxUsdTwd": float(cfg.get("currency_fx_usd_twd", 32.5)),
-        "fxToBase": fx_to_base,
-        "defaultMonthly": default_monthly,
-        "defaultRate": float(cfg.get("expected_annual_return_pct", 8.5)),
+        "storageKey": "snowball_glass_open_v4",
+        "defaultLang": str(cfg.get("default_lang", "en")).lower(),
+        "defaultCurrency": default_currency,
         "defaultTint": str(cfg.get("default_tint", "blue")).lower(),
+        "priceDate": latest_daily_dt,
+        "fxPerUsd": fx_per_usd,
+        "defaultMonthly": default_monthly,
+        "defaultMonthlyCurrency": default_monthly_cur,
+        "defaultRate": float(cfg.get("expected_annual_return_pct", 8.5)),
         "coreRatio": core_ratio,
-        "coreLabel": cfg.get("core_label", "核心 ETF"),
-        "tasksTitle": cfg.get("tasks_title", "每週紀律任務清單"),
+        "coreLabel": cfg.get("core_label", "ETF"),
         "weeklyOutlook": weekly_outlook,
         "tasks": tasks,
         "holdings": holdings_out,
