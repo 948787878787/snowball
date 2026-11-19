@@ -1,6 +1,6 @@
-# tw-quant-factor-v5
+# Snowball (`snowball`)
 
-An open-source **Antigravity Agent Skill** & Python quantitative research engine for **Taiwan equity multi-factor ranking (v5)** and **buy-only retail cash-flow rebalancing**.
+An open-source **Antigravity Agent Skill** & Python quantitative research workbench for **Taiwan equity multi-factor ranking (v5)** and **buy-only retail cash-flow rebalancing** — built to compound high-cash-flow equity snowballs systematically.
 
 > **Disclaimer**: This repository is provided strictly for quantitative research, backtesting methodology, and educational purposes. It does not constitute financial or investment advice.
 

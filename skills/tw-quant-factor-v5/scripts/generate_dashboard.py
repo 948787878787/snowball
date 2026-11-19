@@ -125,8 +125,8 @@ def build_payload(cfg: dict) -> dict:
             core_px = h["price"]
 
     return {
-        "storageKey": "tw_quant_v5_open_dashboard_v1",
-        "title": "tw-quant-factor-v5 實證選股與現金流工作台",
+        "storageKey": "snowball_v5_open_dashboard_v1",
+        "title": "Snowball — 實證選股與現金流工作台",
         "priceDate": latest_daily_dt,
         "modelDate": latest_panel_dt.strftime("%Y-%m-%d"),
         "fxUsdTwd": float(cfg.get("currency_fx_usd_twd", 32.5)),
