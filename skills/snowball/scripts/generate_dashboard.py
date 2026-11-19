@@ -18,6 +18,9 @@ import re
 import sys
 from pathlib import Path
 
+import pandas as pd
+import yfinance as yf
+
 SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent
 TEMPLATE_HTML = SKILL_DIR / "resources" / "dashboard_template.html"
@@ -27,6 +30,38 @@ import data
 from backtest_v3 import load_panels
 from backtest_v5 import build_v5_panels
 from universe import group_of
+
+FX_YAHOO_SYMBOLS = {
+    "TWD": "TWD=X",
+    "EUR": "EUR=X",
+    "JPY": "JPY=X",
+    "HKD": "HKD=X",
+    "KRW": "KRW=X",
+    "GBP": "GBP=X",
+}
+
+
+def fetch_live_nominal_quotes(symbols: list) -> dict:
+    """Batch-fetch latest unadjusted nominal Close prices & exact quote dates from Yahoo Finance."""
+    out = {}
+    unique = list(dict.fromkeys(s for s in symbols if s))
+    if not unique:
+        return out
+    try:
+        raw = yf.download(unique, period="10d", progress=False, auto_adjust=False, threads=True)
+        if raw is None or raw.empty or "Close" not in raw:
+            return out
+        closes = raw["Close"]
+        if isinstance(closes, pd.Series):
+            closes = closes.to_frame(name=unique[0])
+        for sym in unique:
+            if sym in closes.columns:
+                s = closes[sym].dropna()
+                if not s.empty:
+                    out[sym] = (round(float(s.iloc[-1]), 4), s.index[-1].strftime("%Y-%m-%d"))
+    except Exception as exc:
+        print(f"Notice: Live Yahoo quote fetch skipped ({exc}).")
+    return out
 
 STANDALONE_THEME_CSS = """
   <style>
@@ -97,24 +132,36 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
     val_df = None
     s_inc = None
     latest_daily_dt = "demo"
+    live_quotes = {}
+    quote_dates = []
     gmap = group_of()
 
     if not offline:
-        try:
-            p = load_panels()
-            v5 = build_v5_panels(p)
-            close_df = data.load_prices()["close"]
-            val_df = data.load_valuation().sort_values("date").groupby("stock_id").last()
-            latest_daily_dt = close_df.index[-1].strftime("%Y-%m-%d")
-            latest_panel_dt = v5["v5_income"].index[-1]
-            s_inc = v5["v5_income"].loc[latest_panel_dt].dropna().sort_values(ascending=False)
-        except Exception as exc:
-            print(f"Notice: Live cache unavailable ({exc}); generating dashboard with portfolio fallback data.")
+        # 1. Fetch live nominal prices for every portfolio holding + live FX rates from Yahoo Finance
+        hold_syms = [str(h.get("symbol") or h["code"]) for h in cfg.get("holdings", [])]
+        live_quotes = fetch_live_nominal_quotes(hold_syms + list(FX_YAHOO_SYMBOLS.values()))
+        # 2. Optionally attach local Taiwan v5 panels ONLY if already cached on disk (avoid slow cold FinMind download)
+        if (data._cache_dir() / "panels.pkl").exists():
+            try:
+                p = load_panels()
+                v5 = build_v5_panels(p)
+                pr_dict = data.load_prices()
+                close_df = pr_dict.get("raw_close", pr_dict["close"])
+                val_df = data.load_valuation().sort_values("date").groupby("stock_id").last()
+                latest_daily_dt = close_df.index[-1].strftime("%Y-%m-%d")
+                latest_panel_dt = v5["v5_income"].index[-1]
+                s_inc = v5["v5_income"].loc[latest_panel_dt].dropna().sort_values(ascending=False)
+            except Exception as exc:
+                print(f"Notice: Local v5 cache unavailable ({exc}); using live Yahoo quotes.")
 
     holdings_out = []
     for h in cfg.get("holdings", []):
         code = str(h["code"])
-        if close_df is not None and code in close_df.columns and not close_df[code].dropna().empty:
+        sym = str(h.get("symbol") or code)
+        if sym in live_quotes:
+            px, qdt = round(live_quotes[sym][0], 2), live_quotes[sym][1]
+            quote_dates.append(qdt)
+        elif close_df is not None and code in close_df.columns and not close_df[code].dropna().empty:
             px = round(float(close_df[code].dropna().iloc[-1]), 2)
         else:
             px = float(h.get("fallback_price", h["cost"]))
@@ -134,6 +181,9 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
             "tag": h.get("tag", tag),
             "action": action,
         })
+
+    if quote_dates:
+        latest_daily_dt = max(quote_dates)
 
     watch_codes = [str(w["code"]) for w in cfg.get("watchlist", [])]
     screener_out = []
@@ -167,7 +217,7 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
             })
 
     default_currency = str(cfg.get("default_currency", cfg.get("base_currency", "USD"))).upper()
-    fx_per_usd = cfg.get("fx_per_usd") or {
+    fx_per_usd = dict(cfg.get("fx_per_usd") or {
         "USD": 1.0,
         "TWD": float(cfg.get("currency_fx_usd_twd", 32.5)),
         "EUR": 0.925,
@@ -175,7 +225,10 @@ def build_payload(cfg: dict, offline: bool = False) -> dict:
         "HKD": 7.8,
         "KRW": 1390.0,
         "GBP": 0.785,
-    }
+    })
+    for ccy, fx_sym in FX_YAHOO_SYMBOLS.items():
+        if fx_sym in live_quotes:
+            fx_per_usd[ccy] = round(float(live_quotes[fx_sym][0]), 4)
 
     default_monthly = int(cfg.get("monthly_inflow", cfg.get("monthly_inflow_twd", 1000)))
     default_monthly_cur = "USD" if "monthly_inflow" in cfg else ("TWD" if "monthly_inflow_twd" in cfg else default_currency)
