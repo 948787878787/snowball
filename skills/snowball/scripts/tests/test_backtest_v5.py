@@ -64,3 +64,38 @@ def test_dashboard_template_and_injection():
     out = gd.inject_data(html, {"title": "Test Dashboard", "defaultMonthly": 12000})
     assert '"defaultMonthly": 12000' in out
     assert "/*__DATA_START__*/" in out
+
+
+def test_generate_dashboard_offline_end_to_end(tmp_path):
+    import json
+    import generate_dashboard as gd
+
+    cfg = json.loads((gd.SKILL_DIR / "references" / "portfolio-template.json").read_text(encoding="utf-8"))
+    payload = gd.build_payload(cfg, offline=True)
+    assert payload["priceDate"] == "demo"
+    assert len(payload["holdings"]) == len(cfg["holdings"])
+    assert len(payload["screener"]) == len(cfg["watchlist"])
+
+    out_file = tmp_path / "out.html"
+    html = gd.TEMPLATE_HTML.read_text(encoding="utf-8")
+    out_file.write_text(gd.inject_data(html, payload), encoding="utf-8")
+    rendered = out_file.read_text(encoding="utf-8")
+    assert "Snowball" in rendered
+    assert '"defaultMonthly": 10000' in rendered
+
+
+def test_score_predictions_cli_brier_and_bss(tmp_path):
+    import score_predictions as sp
+
+    csv_file = tmp_path / "preds.csv"
+    csv_file.write_text(
+        "prediction_id,target,direction,benchmark,probability,asset_return_pct,benchmark_return_pct,excess_return_pct,outcome,brier_score\n"
+        "P1,StockA,long,SPY,0.60,3.0,1.0,,,\n"
+        "P2,StockB,short,SPY,0.55,-2.0,0.5,,,\n",
+        encoding="utf-8",
+    )
+    stats = sp.evaluate_predictions(csv_file)
+    assert stats["settled"] == 2
+    assert stats["hits"] == 2
+    assert stats["mean_brier"] < 0.25
+    assert stats["bss"] > 0.0

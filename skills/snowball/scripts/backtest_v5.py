@@ -337,8 +337,9 @@ def simulate_personal_cashflow(
       true MDD, max single-stock weight, and realized trade count.
     """
     sig_sub = signal.loc[start:end]
-    px_sub = close_w.loc[start:end]
-    yld_sub = yld.loc[start:end]
+    # Forward-fill single-week missing prices so trading halts/holidays never create fake MDD drops
+    px_sub = close_w.ffill().loc[start:end]
+    yld_sub = yld.ffill().loc[start:end]
     dates = sig_sub.index
 
     shares = {}      # sid -> float shares (odd lots allowed)

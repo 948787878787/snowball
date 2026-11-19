@@ -68,25 +68,34 @@ def inject_data(html: str, payload: dict) -> str:
     return re.sub(r"/\*__DATA_START__\*/.*?/\*__DATA_END__\*/", lambda _: data_js, html, flags=re.S)
 
 
-def build_payload(cfg: dict) -> dict:
-    p = load_panels()
-    v5 = build_v5_panels(p)
-    close_df = data.load_prices()["close"]
-    val_df = data.load_valuation().sort_values("date").groupby("stock_id").last()
+def build_payload(cfg: dict, offline: bool = False) -> dict:
+    close_df = None
+    val_df = None
+    s_inc = None
+    latest_daily_dt = "demo"
+    latest_panel_dt_str = "demo"
     gmap = group_of()
 
-    latest_daily_dt = close_df.index[-1].strftime("%Y-%m-%d")
-    latest_panel_dt = v5["v5_income"].index[-1]
-    s_inc = v5["v5_income"].loc[latest_panel_dt].dropna().sort_values(ascending=False)
+    if not offline:
+        try:
+            p = load_panels()
+            v5 = build_v5_panels(p)
+            close_df = data.load_prices()["close"]
+            val_df = data.load_valuation().sort_values("date").groupby("stock_id").last()
+            latest_daily_dt = close_df.index[-1].strftime("%Y-%m-%d")
+            latest_panel_dt = v5["v5_income"].index[-1]
+            latest_panel_dt_str = latest_panel_dt.strftime("%Y-%m-%d")
+            s_inc = v5["v5_income"].loc[latest_panel_dt].dropna().sort_values(ascending=False)
+        except Exception as exc:
+            print(f"Notice: Live cache unavailable ({exc}); generating dashboard with portfolio fallback data.")
 
     holdings_out = []
     for h in cfg.get("holdings", []):
         code = str(h["code"])
-        px = (
-            round(float(close_df[code].dropna().iloc[-1]), 2)
-            if code in close_df.columns and not close_df[code].dropna().empty
-            else float(h.get("fallback_price", h["cost"]))
-        )
+        if close_df is not None and code in close_df.columns and not close_df[code].dropna().empty:
+            px = round(float(close_df[code].dropna().iloc[-1]), 2)
+        else:
+            px = float(h.get("fallback_price", h["cost"]))
         holdings_out.append({
             "mkt": str(h.get("market", "TW")).upper(),
             "code": code,
@@ -101,20 +110,33 @@ def build_payload(cfg: dict) -> dict:
 
     watch_codes = [str(w["code"]) for w in cfg.get("watchlist", [])]
     screener_out = []
-    for rk, (sid, sc) in enumerate(s_inc.items(), 1):
-        if rk <= 25 or sid in watch_codes:
-            px = round(float(close_df[sid].dropna().iloc[-1]), 2)
-            dy = round(float(val_df.loc[sid, "dividend_yield"]), 2) if sid in val_df.index else 0.0
-            per = round(float(val_df.loc[sid, "PER"]), 2) if sid in val_df.index else 0.0
+    if s_inc is not None and close_df is not None and val_df is not None:
+        for rk, (sid, sc) in enumerate(s_inc.items(), 1):
+            if rk <= 25 or sid in watch_codes:
+                px = round(float(close_df[sid].dropna().iloc[-1]), 2)
+                dy = round(float(val_df.loc[sid, "dividend_yield"]), 2) if sid in val_df.index else 0.0
+                per = round(float(val_df.loc[sid, "PER"]), 2) if sid in val_df.index else 0.0
+                screener_out.append({
+                    "rank": rk,
+                    "code": sid,
+                    "name": sid,
+                    "group": gmap.get(sid, ""),
+                    "price": px,
+                    "yield": dy,
+                    "per": per,
+                    "v5": round(float(sc), 3),
+                })
+    else:
+        for idx, w in enumerate(cfg.get("watchlist", []), 1):
             screener_out.append({
-                "rank": rk,
-                "code": sid,
-                "name": sid,
-                "group": gmap.get(sid, ""),
-                "price": px,
-                "yield": dy,
-                "per": per,
-                "v5": round(float(sc), 3),
+                "rank": idx,
+                "code": str(w["code"]),
+                "name": w.get("name", str(w["code"])),
+                "group": gmap.get(str(w["code"]), "watchlist"),
+                "price": float(w.get("fallback_price", 50.0)),
+                "yield": float(w.get("fallback_yield", 4.5)),
+                "per": float(w.get("fallback_per", 12.0)),
+                "v5": round(1.5 - idx * 0.2, 3),
             })
 
     top_sat = screener_out[0]["code"] if screener_out else "5880"
@@ -128,7 +150,7 @@ def build_payload(cfg: dict) -> dict:
         "storageKey": "snowball_v5_open_dashboard_v1",
         "title": "Snowball — 實證選股與現金流工作台",
         "priceDate": latest_daily_dt,
-        "modelDate": latest_panel_dt.strftime("%Y-%m-%d"),
+        "modelDate": latest_panel_dt_str,
         "fxUsdTwd": float(cfg.get("currency_fx_usd_twd", 32.5)),
         "defaultMonthly": int(cfg.get("monthly_inflow_twd", 10000)),
         "defaultCoreRatio": int(cfg.get("core_ratio_pct", 60)),
@@ -177,10 +199,15 @@ def main() -> None:
         default=Path("v5_dashboard.html"),
         help="Output HTML path.",
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Generate dashboard offline using fallback values without fetching market data.",
+    )
     args = parser.parse_args()
 
     cfg = json.loads(args.portfolio.read_text(encoding="utf-8"))
-    payload = build_payload(cfg)
+    payload = build_payload(cfg, offline=args.offline)
     html = TEMPLATE_HTML.read_text(encoding="utf-8")
     out_html = inject_data(html, payload).replace("<style>", f"{STANDALONE_THEME_CSS}\n  <style>", 1)
     args.output.write_text(out_html, encoding="utf-8")

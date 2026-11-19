@@ -10,6 +10,7 @@ Point-in-time rules applied here:
 """
 
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -20,7 +21,7 @@ import yfinance as yf
 from universe import MACRO_TICKERS, MARKET_INDEX, US_LEAD_TICKERS, all_stock_ids
 
 LOG = logging.getLogger(__name__)
-CACHE_DIR = Path(__file__).parent / "cache"
+CACHE_DIR = Path(os.environ.get("SNOWBALL_CACHE_DIR", str(Path(__file__).parent / "cache")))
 FINMIND_URL = "https://api.finmindtrade.com/api/v4/data"
 START_DATE = "2017-01-01"
 REQUEST_PAUSE_SEC = 1.2
@@ -43,15 +44,19 @@ def _cached(name: str, loader):
 
 
 def _download_yahoo(tickers: list) -> pd.DataFrame:
+    if not tickers:
+        return pd.DataFrame()
     raw = yf.download(tickers, start=START_DATE, progress=False, auto_adjust=True, threads=True)
-    if raw.empty:
-        return raw
+    if raw is None or raw.empty:
+        return pd.DataFrame()
     return raw
 
 
 def _resolve_tw_symbols(stock_ids: tuple) -> dict:
     """Map stock id -> Yahoo symbol (.TW for TWSE, .TWO for TPEx)."""
     first = _download_yahoo([f"{s}.TW" for s in stock_ids])
+    if first.empty or "Close" not in first:
+        raise RuntimeError("Failed to download Yahoo Finance prices. Check network connectivity.")
     closes = first["Close"]
     mapping = {}
     missing = []
@@ -62,13 +67,16 @@ def _resolve_tw_symbols(stock_ids: tuple) -> dict:
         else:
             missing.append(sid)
     if missing:
-        second = _download_yahoo([f"{s}.TWO" for s in missing])["Close"]
+        second_raw = _download_yahoo([f"{s}.TWO" for s in missing])
+        second = second_raw["Close"] if (not second_raw.empty and "Close" in second_raw) else pd.DataFrame()
         for sid in missing:
             col = f"{sid}.TWO"
             if col in second and second[col].notna().sum() > 200:
                 mapping[sid] = col
             else:
                 LOG.warning("No Yahoo data for %s", sid)
+    if not mapping:
+        raise RuntimeError("No valid Taiwan stock symbols resolved from Yahoo Finance.")
     return mapping
 
 

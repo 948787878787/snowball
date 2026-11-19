@@ -1,50 +1,108 @@
 # Snowball (`snowball`)
 
-An open-source **Antigravity Agent Skill** & Python quantitative research workbench for **Taiwan equity multi-factor ranking (v5)** and **buy-only retail cash-flow rebalancing** — built to compound high-cash-flow equity snowballs systematically.
+> **Language / 語言**: **English** | [繁體中文](./README.zh-TW.md)
 
-> **Disclaimer**: This repository is provided strictly for quantitative research, backtesting methodology, and educational purposes. It does not constitute financial or investment advice.
+An open-source **All-Agents Skill** & Python quantitative research workbench for **Taiwan equity multi-factor ranking (v5)**, **point-in-time backtesting**, and **buy-only retail cash-flow rebalancing**.
 
-## What's Inside
+Designed to work seamlessly across **Antigravity (AGY)**, **Claude Code**, **OpenAI Codex CLI**, **Cursor**, **Windsurf**, **Cline**, and **OpenCode**.
 
-- **`skills/tw-quant-factor-v5/SKILL.md`**: Ready-to-use Antigravity Skill definition with progressive disclosure.
-- **`skills/tw-quant-factor-v5/references/empirical-research-v5.md`**: Full academic literature review, v1 → v5 formula audit, and honest out-of-sample performance summary.
-- **`skills/tw-quant-factor-v5/references/portfolio-template.json`**: Zero-PII JSON template for plugging in your own local portfolio.
-- **`skills/tw-quant-factor-v5/scripts/`**:
-  - `backtest_v5.py`: Point-in-time v5 multi-factor engine (Residual Momentum + Full-Group Industry Momentum + Monthly Revenue Momentum + 8%-Capped Cyclical-Normalized Industry-Neutral Value), 4-cohort staggered evaluation, true weekly mark-to-market MDD, and retail odd-lot cash-flow simulator.
-  - `monitor_portfolio.py`: Generic CLI monitor that reads a local JSON portfolio file and outputs v5 rankings, cash-flow rebalancing priorities, and overweight winner-trim alerts.
-  - `generate_dashboard.py`: Generates a self-contained Light/Dark interactive HTML workbench (`resources/dashboard_template.html`) with `localStorage` persistence, editable holdings, a monthly Core+Satellite odd-lot order calculator, and a 10-year compounding simulator.
-  - `score_predictions.py`: Probabilistic forecast tracker and Brier Score evaluator.
-  - `tests/`: 29 pytest unit tests validating factor math, caps, causality, and zero-realized-loss invariants.
+> **Disclaimer**: This repository is strictly for quantitative research, backtesting methodology, and educational use. It is not licensed financial advice.
 
-## Installation
+---
 
-### 1. Install as an Antigravity Skill
-Copy `skills/tw-quant-factor-v5` into either your project's `.agents/skills/` directory or your global `~/.gemini/config/skills/` directory:
+## Features
+
+- **Universal Agent Skill (`skills/snowball/SKILL.md`)**: Follows the open `SKILL.md` progressive-disclosure standard so any AI coding agent can discover and execute the workflow automatically.
+- **v5 Multi-Factor Ranking Engine (`backtest_v5.py`)**:
+  - **Residual Momentum (`F_ResMom_26_4w`)**: 26-week skipping last 4-week Beta-adjusted alpha (Blitz et al. 2011).
+  - **Full-Group Industry Momentum (`F_IndMom_Full_12w`)**: 12-week peer-group mean alpha without small-group leave-one-out reversal bias (Moskowitz & Grinblatt 1999).
+  - **Point-in-Time Revenue Momentum (`F_FinStmt`)**: Trailing 3-month revenue YoY + 3-month acceleration lagged strictly to the 11th of the following month.
+  - **8%-Capped Cyclical-Normalized Industry-Neutral Value (`F_NormVal`)**: Within-peer-group valuation (`1/PBR` for financials, normalized `1/PER` for non-financials) plus capped dividend yield (`<= 8.0%`) with 5-year rolling median normalization for cyclical industries.
+- **Institutional Audit Harness**: 4 staggered overlapping Jegadeesh-Titman cohorts, true weekly mark-to-market MDD, Newey-West (`lags = 6`) t-stats, Jensen's Alpha vs. equal-weight total return, and a realistic retail odd-lot cash-flow simulator (`0.30%` odd-lot slippage + commission + sell tax).
+- **Interactive Light/Dark HTML Workbench (`generate_dashboard.py`)**: Self-contained HTML dashboard with Light/Dark/System themes, `localStorage` persistence, editable holdings, monthly Core+Satellite odd-lot order calculator, and 10-year compounding simulator.
+- **Brier Score Calibration Tracker (`score_predictions.py`)**: Evaluates probabilistic forecasts and reports Hit Rate, Mean Brier Score, and Brier Skill Score (BSS).
+
+---
+
+## Installation for All AI Agents
+
+First, clone the repository:
 
 ```bash
-mkdir -p ~/.gemini/config/skills
-cp -r skills/tw-quant-factor-v5 ~/.gemini/config/skills/
+git clone https://github.com/948787878787/snowball.git
+cd snowball
+chmod +x install.sh
 ```
 
-### 2. Set Up Python Environment & Run Tests
+### Option 1: One-Command Universal Installer (`install.sh`)
+
+| AI Agent / Platform | Global Install (All Projects) | Project-Local Install (Current Workspace) |
+|---|---|---|
+| **Google Antigravity (AGY)** | `./install.sh antigravity` | `./install.sh antigravity --project` |
+| **Claude Code** | `./install.sh claude` | `./install.sh claude --project` |
+| **OpenAI Codex CLI** | `./install.sh codex` | `./install.sh codex --project` |
+| **Cursor** | `./install.sh cursor` | `./install.sh cursor --project` |
+| **Windsurf** | `./install.sh windsurf` | `./install.sh windsurf --project` |
+| **OpenCode / Cline / Universal (`.agents/skills`)** | — | `./install.sh universal` |
+| **Install All Project Agent Paths at Once** | — | `./install.sh all` |
+
+### Option 2: Manual Copy per Platform
+
+- **Antigravity (AGY)**:
+  - Global: `cp -r skills/snowball ~/.gemini/config/skills/`
+  - Workspace: `mkdir -p .agents/skills && cp -r skills/snowball .agents/skills/`
+- **Claude Code**:
+  - Global: `mkdir -p ~/.claude/skills && cp -r skills/snowball ~/.claude/skills/`
+  - Project: `mkdir -p .claude/skills && cp -r skills/snowball .claude/skills/`
+- **OpenAI Codex CLI**:
+  - Global: `mkdir -p ~/.codex/skills && cp -r skills/snowball ~/.codex/skills/`
+  - Project: `mkdir -p .codex/skills && cp -r skills/snowball .codex/skills/`
+- **Cursor**:
+  - Global: `mkdir -p ~/.cursor/skills && cp -r skills/snowball ~/.cursor/skills/`
+  - Project: `mkdir -p .cursor/skills && cp -r skills/snowball .cursor/skills/`
+- **Windsurf / Cline / OpenCode**:
+  - Project: `mkdir -p .agents/skills && cp -r skills/snowball .agents/skills/`
+
+---
+
+## Python Quickstart (Standalone CLI)
+
 ```bash
+# 1. Create virtual environment & install dependencies
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/pytest skills/tw-quant-factor-v5/scripts
+
+# 2. Run offline unit test suite (32 tests)
+.venv/bin/pytest skills/snowball/scripts
+
+# 3. Run full v5 point-in-time backtest (downloads Yahoo Finance + FinMind data into local cache/)
+.venv/bin/python skills/snowball/scripts/backtest_v5.py
+
+# 4. Copy zero-PII portfolio template (gitignored) & run weekly monitor
+cp skills/snowball/references/portfolio-template.json ./my_portfolio.json
+.venv/bin/python skills/snowball/scripts/monitor_portfolio.py --portfolio ./my_portfolio.json
+
+# 5. Generate interactive Light/Dark HTML dashboard (supports --offline demo mode)
+.venv/bin/python skills/snowball/scripts/generate_dashboard.py --portfolio ./my_portfolio.json --output ./snowball_dashboard.html
+
+# 6. Evaluate probabilistic forecasts (Brier Score & BSS)
+.venv/bin/python skills/snowball/scripts/score_predictions.py --csv ./my_predictions.csv
 ```
 
-### 3. Run the v5 Backtest or Portfolio Monitor
-```bash
-# Run full v5 point-in-time backtest (downloads & caches Yahoo Finance + FinMind data locally)
-.venv/bin/python skills/tw-quant-factor-v5/scripts/backtest_v5.py
+---
 
-# Copy template to a local gitignored file and run weekly monitor
-cp skills/tw-quant-factor-v5/references/portfolio-template.json ./my_portfolio.json
-.venv/bin/python skills/tw-quant-factor-v5/scripts/monitor_portfolio.py --portfolio ./my_portfolio.json
+## Out-of-Sample Audit Summary (`2024-01` – `2026-11`)
 
-# Generate interactive Light/Dark HTML dashboard
-.venv/bin/python skills/tw-quant-factor-v5/scripts/generate_dashboard.py --portfolio ./my_portfolio.json --output ./v5_dashboard.html
-```
+4 staggered cohorts, true weekly mark-to-market MDD, Newey-West `lags = 6`, long-only Top 20% after `0.585%` round-trip cost, benchmarked against same-universe Equal-Weight Total Return (`EW-84 TR`, MDD `-17.8%`):
+
+| Model | Rank IC (NW6 t) | Net Excess vs EW | Beta | Jensen Alpha (t) | Weekly MDD | Sharpe | 4w Turnover | Avg Sectors |
+|---|---|---|---|---|---|---|---|---|
+| `v3_smooth4w` | 0.0773 (3.93) | +11.96% | 1.049 | +10.36% (1.52) | -18.1% | 1.88 | 31.9% | 10.1 |
+| `v4_income` | 0.0924 (4.57) | +8.74% | 0.952 | +10.31% (1.46) | -15.7% | 1.84 | 38.1% | 9.1 |
+| `v5_core` | 0.0950 (5.14) | +16.55% | 1.166 | +11.15% (1.69) | -23.2% | 1.88 | 27.2% | 9.9 |
+| **`v5_income`** | **0.0960 (5.63)** | +13.08% | **0.961** | **+14.33% (2.16)** | **-17.4%** | **2.08** | **24.8%** | **11.2** |
+
+> **Survivorship Bias Disclosure**: The 84-stock peer universe is curated ex-post and omits delisted stocks. Expected live net alpha in a point-in-time Top-150 Taiwan universe after odd-lot spreads is realistically **+1.5% to +3.0% / year**. See [`skills/snowball/references/empirical-research-v5.md`](./skills/snowball/references/empirical-research-v5.md) for full details.
 
 ## License
 
