@@ -40,11 +40,13 @@ Every regional market ships as an editable JSON database (`skills/snowball/resou
 ## Features
 
 - **Universal Agent Skill (`skills/snowball/SKILL.md`)**: Follows the open `SKILL.md` progressive-disclosure standard so any AI coding agent can discover and execute the workflow automatically.
-- **Global v5 Multi-Factor Engine (`global_ranker.py` & `backtest_v5.py`)**:
-  - **Residual Momentum (`F_ResMom_26_4w`)**: 26-week skipping last 4-week Beta-adjusted alpha (Blitz et al. 2011).
-  - **Full-Group Industry Momentum (`F_IndMom_Full_12w`)**: 12-week peer-group mean alpha without small-group leave-one-out reversal bias (Moskowitz & Grinblatt 1999).
-  - **Point-in-Time Revenue Momentum (`F_FinStmt`)**: Trailing 3-month revenue YoY + 3-month acceleration lagged strictly to the 11th of the following month.
-  - **8%-Capped Cyclical-Normalized Industry-Neutral Value (`F_NormVal`)**: Within-peer-group valuation (`1/PBR` for financials, normalized `1/PER` for non-financials) plus capped dividend yield (`<= 8.0%`) with 5-year rolling median normalization for cyclical industries.
+- **Global v6 6-Pillar Empirical Multi-Factor Engine (`global_ranker.py` & `backtest_v5.py`)** (also supports `--model v5`):
+  - **Momentum Quality (`F_MomQual`, 20%)**: Volatility-Scaled Residual Momentum (Blitz et al. 2011 *JEF*; Barroso & Santa-Clara 2015 *JFE*) + Frog-in-the-Pan Continuous Information smoothness (`FIP`, Da, Gurun, & Warachka 2014 *RFS*).
+  - **Full-Group Industry Momentum (`F_IndMom`, 15%)**: 12-week peer-group mean alpha without small-group leave-one-out reversal bias (Moskowitz & Grinblatt 1999 *JF*; Ehsani & Linnainmaa 2022 *JF*).
+  - **Capital-Structure-Neutral Multi-Metric Value (`F_NormVal`, 25%)**: Within-peer-group `1/PBR` (financials) or `0.5 × E/P + 0.5 × EBITDA/EV` (non-financials, Loughran & Wellman 2011 *JFQA*, strictly trailing P/E) + `0.5 ×` capped dividend yield (`<= 8.0%`, Boudoukh et al. 2007 *JF*).
+  - **Quality & Cash-Flow Profitability (`F_Quality`, 20%)**: Within-industry `ROE`, Operating Margin, Gross Margin (Novy-Marx 2013 *JFE*; Fama & French 2015 *JFE*), `FCF Yield` (Ball et al. 2016 *JFE*), minus non-financial Debt/Equity (`QMJ`, Asness, Frazzini, & Pedersen 2019 *RAST*).
+  - **Fundamental Growth (`F_Fund`, 10%)**: Revenue + Earnings growth YoY globally (or point-in-time lagged monthly revenue YoY + acceleration in Taiwan).
+  - **Defensive Low-Risk (`F_LowRisk`, 10%)**: Betting Against Beta (Frazzini & Pedersen 2014 *JFE*) + Low Idiosyncratic Volatility (Ang et al. 2006 *JF*).
 - **Institutional Audit Harness**: 4 staggered overlapping Jegadeesh-Titman cohorts, true weekly mark-to-market MDD, Newey-West (`lags = 6`) t-stats, Jensen's Alpha vs. equal-weight total return, and a realistic retail odd-lot cash-flow simulator (`0.30%` odd-lot slippage + commission + sell tax).
 - **Minimalist Liquid Glass HTML Dashboard (`generate_dashboard.py`)**: Self-contained frosted-glass (`backdrop-filter`) consumer UI with automatic system/host color adaptation and a sleek **Settings popover** featuring **7 rainbow glass tints (Red, Orange, Yellow, Green, Blue, Indigo, Violet)**, **5 languages (English default, 繁體中文, 日本語, 한국어, Deutsch)**, and **6 live-converted display currencies (USD default, TWD, EUR, JPY, HKD, KRW)**, plus `localStorage` persistence, editable monthly contribution & expected annual return rate, next-week market outlook, checklist, editable holdings, and Y1–Y10 compounding calculator.
 - **Brier Score Calibration Tracker (`score_predictions.py`)**: Evaluates probabilistic forecasts and reports Hit Rate, Mean Brier Score, and Brier Skill Score (BSS).

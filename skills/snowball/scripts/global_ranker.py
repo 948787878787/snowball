@@ -1,16 +1,30 @@
 #!/usr/bin/env python3
-"""Universal Global Equity v5 Multi-Factor Ranker & Point-in-Time Backtester.
+"""Universal Global Equity Multi-Factor Ranker & Point-in-Time Backtester (v6 & v5).
 
-Works across ANY Yahoo Finance equity market (US, EU, JP, HK, TW, GLOBAL — 1,340+ built-in stocks
-across 13 industries with >= 20 stocks/industry and >= 250 stocks/market), custom JSON universe
-files, or arbitrary comma-separated tickers:
-1. Residual Momentum (F_ResMom_26_4w, Blitz et al. 2011): 26w skipping 4w Beta-adjusted alpha.
-2. Full-Group Industry Momentum (F_IndMom_Full_12w, Moskowitz & Grinblatt 1999).
-3. Fundamental Growth (F_Fund): Revenue growth snapshot (live ranking) or neutral in
-   pure-price historical mode.
-4. 8%-Capped Industry-Neutral Value (F_NormVal): Within-sector 1/PBR (financials) or capped
-   trailing 1/PER (non-financials, E/P <= 15%, strictly excluding loss-making forwardPE fallbacks)
-   + 0.5 * capped dividend yield (Yield <= 8.0%, computed from trailing annual dividend rate/yield).
+Works across ANY Yahoo Finance equity market (US 1,000, TW 1,000, EU 260, JP 260, HK 260,
+GLOBAL 2,780+ stocks across 13 standardized industries), custom JSON universe files,
+or arbitrary comma-separated tickers.
+
+Default v6 6-Pillar Empirical Formula (Peer-Reviewed Asset Pricing Architecture):
+1. Momentum Quality (F_MomQual, 20%):
+   - Volatility-Scaled Residual Momentum (Blitz, Huij, & Martens 2011 JEF; Barroso & Santa-Clara 2015 JFE):
+     26w skipping last 4w cumulative Beta-adjusted alpha divided by trailing residual volatility.
+   - Frog-in-the-Pan Continuous Information (Da, Gurun, & Warachka 2014 RFS):
+     ID = sgn(PRET) * (%neg_weeks - %pos_weeks); rewards smooth, persistent trends over lottery jumps.
+2. Full-Group Industry Momentum (F_IndMom_Full_12w, 15%):
+   - Moskowitz & Grinblatt (1999 JF); Ehsani & Linnainmaa (2022 JF).
+3. Multi-Metric Capital-Structure-Neutral Value (F_NormVal, 25%):
+   - Non-financials: within-industry 0.5*z(min(E/P, 15%)) + 0.5*z(min(EBITDA/EV, 25%))
+     (Loughran & Wellman 2011 JFQA; strictly trailing P/E, no forwardPE fallback for loss firms).
+   - Financials: within-industry z(1/PBR) (Bhojraj & Lee 2002 JAR).
+   - Payout component: + 0.5*z(min(DividendYield, 8.0%)) (Boudoukh et al. 2007 JF).
+4. Quality & Cash-Flow Profitability (F_Quality, 20%):
+   - Novy-Marx (2013 JFE), Fama & French (2015 JFE), Ball et al. (2016 JFE), Asness, Frazzini, & Pedersen (2019 RAST):
+     within-industry ROE, Operating Margin, Gross Margin + FCF Yield - Non-Financial Debt/Equity.
+5. Fundamental Growth (F_Fund, 10%):
+   - Revenue Growth YoY + Earnings Growth YoY (Ball & Brown 1968 JAR; Bernard & Thomas 1989 JAR).
+6. Defensive Low-Risk (F_LowRisk, 10%):
+   - Betting Against Beta (Frazzini & Pedersen 2014 JFE) + Low Idiosyncratic Volatility (Ang et al. 2006 JF).
 
 Audit & Anti-Look-Ahead Guarantees:
 - Next-trading-day Open execution (Monday open fill after Friday close signal, eliminating same-bar bias).
@@ -19,10 +33,10 @@ Audit & Anti-Look-Ahead Guarantees:
 
 Usage:
     python global_ranker.py --market US --top 20
+    python global_ranker.py --market US --model v5 --top 20
     python global_ranker.py --market US --industry semiconductors_hardware
     python global_ranker.py --market GLOBAL --backtest --skip-fundamentals
     python global_ranker.py --universe-file ./my_extra_universe.json
-    python global_ranker.py --tickers AAPL,MSFT,GOOGL,ASML.AS,7203.T,2330.TW --benchmark ACWI
     python global_ranker.py --market US --offline-demo
 """
 
@@ -54,6 +68,8 @@ from global_universe import (
 
 BETA_WINDOW = 52
 BETA_MIN = 26
+EBITDA_EV_CAP = 0.25
+FCF_YIELD_CAP = 0.15
 
 SUFFIX_CURRENCY = {
     ".T": "JPY",
@@ -79,8 +95,6 @@ SUFFIX_CURRENCY = {
     ".VI": "EUR",
 }
 
-# Yahoo FX tickers: (yahoo_symbol, is_usd_per_local)
-# e.g. EURUSD=X quotes USD per 1 EUR (multiply local price by FX); JPY=X quotes JPY per 1 USD (divide by FX).
 FX_TO_USD_TICKERS = {
     "EUR": ("EURUSD=X", True),
     "GBP": ("GBPUSD=X", True),
@@ -110,11 +124,7 @@ def convert_prices_to_usd(
     fx_series_map: Optional[Dict[str, Tuple[pd.Series, bool]]] = None,
     period: str = "5y",
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
-    """Convert non-USD daily stock prices into USD using historical FX series.
-
-    Eliminates FX drift/volatility contamination when regressing multi-currency global equities
-    against a USD benchmark (e.g., ACWI).
-    """
+    """Convert non-USD daily stock prices into USD using historical FX series."""
     needed_ccys = sorted({
         infer_ticker_currency(c) for c in close_d.columns if infer_ticker_currency(c) != "USD"
     })
@@ -216,13 +226,7 @@ def download_global_prices(
 
 
 def parse_yahoo_dividend_yield_pct(info: dict) -> float:
-    """Parse trailing annual dividend yield in percentage points (e.g., 0.42 -> 0.42%) safely.
-
-    Fixes Yahoo Finance's 2025 schema change where `dividendYield` is already in percent
-    (e.g., AAPL = 0.42 meaning 0.42%), whereas `trailingAnnualDividendYield` is a decimal
-    ratio (0.0042). Never multiplies `dividendYield < 0.5` by 100.
-    """
-    # 1. Most reliable & scale-invariant: trailingAnnualDividendRate / price
+    """Parse trailing annual dividend yield in percentage points (e.g., 0.42 -> 0.42%) safely."""
     rate = info.get("trailingAnnualDividendRate")
     px = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
     if rate is not None and px is not None:
@@ -233,7 +237,6 @@ def parse_yahoo_dividend_yield_pct(info: dict) -> float:
         except (TypeError, ValueError):
             pass
 
-    # 2. Secondary: trailingAnnualDividendYield (strictly decimal ratio in Yahoo Finance)
     ty = info.get("trailingAnnualDividendYield")
     if ty is not None:
         try:
@@ -243,7 +246,6 @@ def parse_yahoo_dividend_yield_pct(info: dict) -> float:
         except (TypeError, ValueError):
             pass
 
-    # 3. Last fallback: dividendYield (percentage points in yfinance >= 0.2.54)
     dy = info.get("dividendYield")
     if dy is not None:
         try:
@@ -275,6 +277,20 @@ def parse_yahoo_trailing_pe(info: dict) -> float:
     return np.nan
 
 
+def _safe_float(val, positive_only: bool = False) -> float:
+    if val is None:
+        return np.nan
+    try:
+        x = float(val)
+        if not np.isfinite(x):
+            return np.nan
+        if positive_only and x <= 0.0:
+            return np.nan
+        return x
+    except (TypeError, ValueError):
+        return np.nan
+
+
 def _fetch_one_fundamental(sym: str) -> dict:
     try:
         info = yf.Ticker(sym).info or {}
@@ -282,8 +298,23 @@ def _fetch_one_fundamental(sym: str) -> dict:
         info = {}
     dy_pct = parse_yahoo_dividend_yield_pct(info)
     per = parse_yahoo_trailing_pe(info)
-    pbr = info.get("priceToBook")
-    rev_g = info.get("revenueGrowth")
+    pbr = _safe_float(info.get("priceToBook"), positive_only=True)
+    ev_ebitda = _safe_float(info.get("enterpriseToEbitda"), positive_only=True)
+    rev_g = _safe_float(info.get("revenueGrowth"))
+    earn_g = _safe_float(info.get("earningsGrowth"))
+    roe = _safe_float(info.get("returnOnEquity"))
+    op_margin = _safe_float(info.get("operatingMargins"))
+    gross_margin = _safe_float(info.get("grossMargins"))
+    d2e = _safe_float(info.get("debtToEquity"))
+    if np.isfinite(d2e) and d2e < 0.0:
+        d2e = np.nan
+
+    fcf = _safe_float(info.get("freeCashflow"))
+    ev_val = _safe_float(info.get("enterpriseValue"), positive_only=True)
+    mcap = _safe_float(info.get("marketCap"), positive_only=True)
+    denom = ev_val if np.isfinite(ev_val) else mcap
+    fcf_yield = (fcf / denom) if (np.isfinite(fcf) and np.isfinite(denom) and denom > 0.0) else np.nan
+
     return {
         "ticker": sym,
         "name": info.get("shortName") or sym,
@@ -291,15 +322,27 @@ def _fetch_one_fundamental(sym: str) -> dict:
         "currency": info.get("currency") or infer_ticker_currency(sym),
         "dividend_yield": max(0.0, dy_pct),
         "PER": per,
-        "PBR": float(pbr) if pbr is not None and float(pbr) > 0 else np.nan,
-        "rev_growth": float(rev_g) if rev_g is not None else np.nan,
+        "PBR": pbr,
+        "ev_ebitda": ev_ebitda,
+        "rev_growth": rev_g,
+        "earnings_growth": earn_g,
+        "roe": roe,
+        "op_margin": op_margin,
+        "gross_margin": gross_margin,
+        "fcf_yield": fcf_yield,
+        "debt_to_equity": d2e,
     }
 
 
 def fetch_global_fundamentals(tickers: list, max_workers: int = 8) -> pd.DataFrame:
     """Fetch point-in-time snapshot fundamentals concurrently from Yahoo Finance."""
+    cols = [
+        "name", "sector", "currency", "dividend_yield", "PER", "PBR", "ev_ebitda",
+        "rev_growth", "earnings_growth", "roe", "op_margin", "gross_margin",
+        "fcf_yield", "debt_to_equity",
+    ]
     if not tickers:
-        return pd.DataFrame(columns=["name", "sector", "currency", "dividend_yield", "PER", "PBR", "rev_growth"])
+        return pd.DataFrame(columns=cols)
     workers = max(1, min(max_workers, len(tickers)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         rows = list(pool.map(_fetch_one_fundamental, tickers))
@@ -316,7 +359,14 @@ def make_neutral_fundamentals(tickers: list) -> pd.DataFrame:
         "dividend_yield": 0.0,
         "PER": np.nan,
         "PBR": np.nan,
+        "ev_ebitda": np.nan,
         "rev_growth": np.nan,
+        "earnings_growth": np.nan,
+        "roe": np.nan,
+        "op_margin": np.nan,
+        "gross_margin": np.nan,
+        "fcf_yield": np.nan,
+        "debt_to_equity": np.nan,
     }).set_index("ticker")
 
 
@@ -340,8 +390,7 @@ def compute_global_price_factors(
     groups: dict,
     open_d: Optional[pd.DataFrame] = None,
 ) -> dict:
-    """Compute weekly point-in-time Residual Momentum, Full-Group Industry Momentum,
-    and next-trading-day Open execution prices."""
+    """Compute weekly point-in-time v5 & v6 price factors and next-trading-day Open prices."""
     close_w = close_d.resample("W-FRI").last().ffill()
     bench_w = bench_d.resample("W-FRI").last().ffill().reindex(close_w.index)
     next_open_w = (
@@ -354,77 +403,158 @@ def compute_global_price_factors(
     mkt_1w = bench_w.pct_change(fill_method=None)
 
     beta = ft.rolling_beta(ret_1w, mkt_1w, BETA_WINDOW, BETA_MIN)
-    alpha = ret_1w - beta.shift(1).mul(mkt_1w, axis=0)
+    beta_lag = beta.shift(1)
+    alpha = ret_1w - beta_lag.mul(mkt_1w, axis=0)
     target_4w = sum(alpha.shift(-k) for k in range(1, 5))
 
-    # 1. Residual Momentum (Blitz et al. 2011): 26w skipping last 4w cumulative alpha
+    # Trailing idiosyncratic volatility (26w)
+    ivol = alpha.rolling(26, min_periods=13).std()
+
+    # 1a. Raw Residual Momentum (v5): 26w skipping last 4w cumulative alpha
     res_mom_raw = alpha.shift(4).rolling(22, min_periods=12).sum()
     f_res_mom = ft.cs_zscore(res_mom_raw)
 
-    # 2. Full-Group Industry Momentum (12w inclusive group mean alpha)
+    # 1b. Volatility-Scaled Residual Momentum (Blitz et al. 2011 JEF; Barroso & Santa-Clara 2015 JFE)
+    res_vol = alpha.shift(4).rolling(22, min_periods=12).std().replace(0.0, np.nan)
+    res_mom_vol_raw = res_mom_raw / (res_vol * np.sqrt(22.0))
+    f_res_mom_vol = ft.cs_zscore(res_mom_vol_raw)
+
+    # 1c. Frog-in-the-Pan Continuous Information (Da, Gurun, & Warachka 2014 RFS)
+    # ID = sgn(PRET_26_4w) * (%neg_weeks - %pos_weeks); negative ID = smooth persistent trend
+    ret_shifted = ret_1w.shift(4)
+    pret_26_4 = (1.0 + ret_shifted).rolling(22, min_periods=12).apply(np.prod, raw=True) - 1.0
+    pos_frac = (ret_shifted > 0.0).astype(float).rolling(22, min_periods=12).mean()
+    neg_frac = (ret_shifted < 0.0).astype(float).rolling(22, min_periods=12).mean()
+    info_discreteness = np.sign(pret_26_4) * (neg_frac - pos_frac)
+    f_fip = ft.cs_zscore(-info_discreteness)
+
+    # Combined Momentum Quality (75% Vol-Scaled ResMom + 25% Frog-in-the-Pan Smoothness)
+    f_mom_qual = ft.cs_zscore(0.75 * f_res_mom_vol.fillna(0.0) + 0.25 * f_fip.fillna(0.0)).where(f_res_mom_vol.notna())
+
+    # 2. Full-Group Industry Momentum (12w inclusive group mean alpha, Moskowitz & Grinblatt 1999 JF)
     alpha_12w = alpha.rolling(12, min_periods=6).sum()
     f_ind_mom = ft.cs_zscore(_group_mean_incl(alpha_12w, groups))
 
-    # 3. Low Idiosyncratic Volatility (defensive tie-breaker for pure-price backtest)
-    ivol = alpha.rolling(26, min_periods=13).std()
+    # 3. Defensive Low-Risk: Betting Against Beta (Frazzini & Pedersen 2014 JFE) + Low IVOL (Ang et al. 2006 JF)
     f_low_vol = ft.cs_zscore(-ivol)
+    f_bab = ft.cs_zscore(-beta_lag)
+    f_low_risk = ft.cs_zscore(0.5 * f_bab.fillna(0.0) + 0.5 * f_low_vol.fillna(0.0)).where(ivol.notna())
 
     return {
         "close_w": close_w,
         "next_open_w": next_open_w,
         "ret_1w": ret_1w,
         "mkt_1w": mkt_1w,
+        "beta": beta_lag,
+        "ivol": ivol,
         "alpha": alpha,
         "target_4w": target_4w,
         "f_res_mom": f_res_mom,
+        "f_res_mom_vol": f_res_mom_vol,
+        "f_fip": f_fip,
+        "f_mom_qual": f_mom_qual,
         "f_ind_mom": f_ind_mom,
         "f_low_vol": f_low_vol,
+        "f_low_risk": f_low_risk,
     }
+
+
+def _cs_z_series(s: pd.Series) -> pd.Series:
+    sd = s.std()
+    if not (sd and np.isfinite(sd) and sd > 0.0):
+        return pd.Series(0.0, index=s.index)
+    return ((s - s.mean()) / sd).clip(-3.0, 3.0).fillna(0.0)
+
+
+def _group_z_series(s: pd.Series, groups: dict) -> pd.Series:
+    df = s.to_frame().T
+    gz = _group_zscore(df, groups).iloc[0]
+    if gz.isna().all():
+        return _cs_z_series(s)
+    return gz.fillna(0.0)
 
 
 def score_latest_global(
     price_factors: dict,
     fundamentals: pd.DataFrame,
     groups: dict,
+    model: str = "v6",
 ) -> pd.DataFrame:
-    """Combine latest weekly Residual Momentum, Industry Momentum, Revenue Growth, and 8%-Capped Value."""
+    """Score latest global cross-section using v6 (6-pillar) or v5 (4-pillar) empirical formula."""
     dt = price_factors["f_res_mom"].index[-1]
     tickers = list(price_factors["close_w"].columns)
     gmap = group_map_for(groups)
 
     f_res = price_factors["f_res_mom"].loc[dt].reindex(tickers).fillna(0.0)
+    f_mom_qual = price_factors["f_mom_qual"].loc[dt].reindex(tickers).fillna(0.0)
+    f_fip = price_factors["f_fip"].loc[dt].reindex(tickers).fillna(0.0)
     f_ind = price_factors["f_ind_mom"].loc[dt].reindex(tickers).fillna(0.0)
+    f_low_risk = price_factors["f_low_risk"].loc[dt].reindex(tickers).fillna(0.0)
 
     fund = fundamentals.reindex(tickers)
+    for col in ("ev_ebitda", "earnings_growth", "roe", "op_margin", "gross_margin", "fcf_yield", "debt_to_equity"):
+        if col not in fund.columns:
+            fund[col] = np.nan
+
+    # Pillar: Multi-Metric Capital-Structure-Neutral Value (E/P + EBITDA/EV for non-fin; B/P for fin; + 0.5*Capped Yield)
     ey = (1.0 / fund["PER"].where(fund["PER"] > 0)).clip(upper=EY_CAP).fillna(0.0)
     bp = 1.0 / fund["PBR"].where(fund["PBR"] > 0)
+    ebitda_ev = (1.0 / fund["ev_ebitda"].where(fund["ev_ebitda"] > 0)).clip(upper=EBITDA_EV_CAP)
     yld_cap = fund["dividend_yield"].fillna(0.0).clip(upper=YIELD_CAP_PCT)
 
-    core_val = pd.Series(
-        {t: (bp[t] if gmap.get(t) in GLOBAL_PB_GROUPS else ey[t]) for t in tickers},
+    ey_ind = _group_z_series(ey, groups)
+    bp_ind = _group_z_series(bp, groups)
+    ev_ind = _group_z_series(ebitda_ev, groups)
+    has_ev = ebitda_ev.notna()
+
+    val_core = pd.Series(
+        {
+            t: (
+                bp_ind[t]
+                if gmap.get(t) in GLOBAL_PB_GROUPS
+                else (0.5 * ey_ind[t] + 0.5 * ev_ind[t] if (model == "v6" and bool(has_ev[t])) else ey_ind[t])
+            )
+            for t in tickers
+        },
         dtype=float,
     )
-    # Within-group value z-score (fallback to cross-sectional if single-stock custom group)
-    val_df = core_val.to_frame().T
-    val_ind = _group_zscore(val_df, groups).iloc[0]
-    if val_ind.isna().all():
-        sd = core_val.std()
-        val_ind = ((core_val - core_val.mean()) / sd).clip(-3.0, 3.0) if (sd and sd > 0) else pd.Series(0.0, index=tickers)
-    val_ind = val_ind.fillna(0.0)
+    val_yld = _cs_z_series(yld_cap)
+    f_norm_val = _cs_z_series(val_core + 0.5 * val_yld)
 
-    yld_sd = yld_cap.std()
-    val_yld = ((yld_cap - yld_cap.mean()) / yld_sd).clip(-3.0, 3.0) if (yld_sd and yld_sd > 0) else pd.Series(0.0, index=tickers)
-    raw_val = val_ind + 0.5 * val_yld
-    rv_sd = raw_val.std()
-    f_norm_val = ((raw_val - raw_val.mean()) / rv_sd).clip(-3.0, 3.0) if (rv_sd and rv_sd > 0) else pd.Series(0.0, index=tickers)
+    # Pillar: Quality & Cash-Flow Profitability (Novy-Marx 2013, Fama-French 2015, Ball et al. 2016, AFP 2019 QMJ)
+    z_roe = _group_z_series(fund["roe"].clip(-0.5, 1.0), groups)
+    z_opm = _group_z_series(fund["op_margin"].clip(-0.5, 0.8), groups)
+    z_gm = _group_z_series(fund["gross_margin"].clip(-0.2, 0.95), groups)
+    z_fcf = _cs_z_series(fund["fcf_yield"].clip(-FCF_YIELD_CAP, FCF_YIELD_CAP))
+    non_fin_d2e = pd.Series(
+        {t: (np.nan if gmap.get(t) in GLOBAL_PB_GROUPS else fund.loc[t, "debt_to_equity"]) for t in tickers},
+        dtype=float,
+    ).clip(0.0, 500.0)
+    z_lev = _cs_z_series(non_fin_d2e)
+    f_quality = _cs_z_series(0.40 * z_roe + 0.30 * z_opm + 0.30 * z_gm + 0.25 * z_fcf - 0.25 * z_lev)
 
-    rev_g = fund["rev_growth"].clip(-0.5, 1.5)
-    rev_sd = rev_g.std()
-    f_fin = ((rev_g - rev_g.mean()) / rev_sd).clip(-3.0, 3.0).fillna(0.0) if (rev_sd and rev_sd > 0) else pd.Series(0.0, index=tickers)
+    # Pillar: Fundamental Growth (Revenue YoY + Earnings YoY)
+    z_rev = _cs_z_series(fund["rev_growth"].clip(-0.5, 1.5))
+    z_earn = _cs_z_series(fund["earnings_growth"].clip(-0.5, 1.5))
+    has_earn = fund["earnings_growth"].notna().any()
+    f_fin = _cs_z_series(0.60 * z_rev + 0.40 * z_earn) if (model == "v6" and has_earn) else z_rev
 
-    raw_score = 0.5 * f_res + 0.5 * f_ind + 1.0 * f_fin + 1.5 * f_norm_val
-    rs_sd = raw_score.std()
-    v5_score = ((raw_score - raw_score.mean()) / rs_sd).clip(-3.0, 3.0) if (rs_sd and rs_sd > 0) else pd.Series(0.0, index=tickers)
+    # Composite Scores
+    raw_v5 = 0.5 * f_res + 0.5 * f_ind + 1.0 * z_rev + 1.5 * f_norm_val
+    v5_score = _cs_z_series(raw_v5)
+
+    raw_v6 = (
+        0.20 * f_mom_qual
+        + 0.15 * f_ind
+        + 0.25 * f_norm_val
+        + 0.20 * f_quality
+        + 0.10 * f_fin
+        + 0.10 * f_low_risk
+    )
+    v6_score = _cs_z_series(raw_v6)
+
+    score_col = "v5_score" if model.lower() == "v5" else "v6_score"
+    active_score = v5_score if model.lower() == "v5" else v6_score
 
     out = pd.DataFrame({
         "ticker": tickers,
@@ -434,11 +564,15 @@ def score_latest_global(
         "yield_%": fund["dividend_yield"].fillna(0.0).values,
         "PER": fund["PER"].values,
         "rev_yoy_%": (fund["rev_growth"] * 100.0).values,
-        "res_mom": f_res.values,
+        "mom_qual": f_mom_qual.values,
+        "fip": f_fip.values,
         "ind_mom": f_ind.values,
         "norm_val": f_norm_val.values,
+        "quality": f_quality.values,
+        "low_risk": f_low_risk.values,
         "v5_score": v5_score.values,
-    }).sort_values("v5_score", ascending=False).reset_index(drop=True)
+        "v6_score": v6_score.values,
+    }).sort_values(score_col, ascending=False).reset_index(drop=True)
     out.insert(0, "rank", range(1, len(out) + 1))
     return out
 
@@ -448,19 +582,26 @@ def backtest_global_staggered(
     round_trip_cost: float = 0.0020,
     buy_frac: float = 0.20,
     membership_mask: Optional[pd.DataFrame] = None,
+    model: str = "v6",
 ) -> dict:
     """4-cohort staggered historical backtest with realistic Next-Trading-Day Open execution.
 
-    When a cohort rebalances on Friday close `dt`:
-    - Newly bought stocks enter at `next_open_w.loc[dt]` (Monday open), earning `Close[nxt] / Open[Mon] - 1`.
-    - Retained stocks stay invested through the weekend, earning `Close[nxt] / Close[dt] - 1`.
-    - Exited stocks close at `next_open_w.loc[dt]`, realizing the weekend gap `Open[Mon] / Close[dt] - 1`
-      on the exiting slice before cash rotates into new buys (approximated transparently via
-      weighted entry/retention returns minus half-spread/cost).
+    Pure-price point-in-time signals:
+    - v6: 0.45 * Vol-Scaled ResMom + 0.15 * Frog-in-the-Pan + 0.25 * IndMom + 0.15 * LowRisk (BAB+IVOL)
+    - v5: 0.50 * ResMom + 0.50 * IndMom
     """
-    sig = ft.cs_zscore(
-        price_factors["f_res_mom"].fillna(0.0) + price_factors["f_ind_mom"].fillna(0.0)
-    ).where(price_factors["f_res_mom"].notna())
+    if model.lower() == "v5":
+        sig = ft.cs_zscore(
+            price_factors["f_res_mom"].fillna(0.0) + price_factors["f_ind_mom"].fillna(0.0)
+        ).where(price_factors["f_res_mom"].notna())
+    else:
+        sig = ft.cs_zscore(
+            0.45 * price_factors["f_res_mom_vol"].fillna(0.0)
+            + 0.15 * price_factors["f_fip"].fillna(0.0)
+            + 0.25 * price_factors["f_ind_mom"].fillna(0.0)
+            + 0.15 * price_factors["f_low_risk"].fillna(0.0)
+        ).where(price_factors["f_res_mom_vol"].notna())
+
     if membership_mask is not None:
         aligned_mask = membership_mask.reindex(index=sig.index, columns=sig.columns).fillna(False).astype(bool)
         sig = sig.where(aligned_mask)
@@ -510,18 +651,15 @@ def backtest_global_staggered(
             if held:
                 per_stock_rets = []
                 retained = held - new_entries
-                # Retained holdings earn Friday-close -> next-Friday-close
                 if retained:
                     r_ret = ret_1w.loc[nxt, list(retained)].dropna()
                     per_stock_rets.extend(r_ret.tolist())
 
-                # Newly entered holdings execute at Monday Open -> next-Friday-close
                 if new_entries:
                     if next_open_w is not None and dt in next_open_w.index:
                         ent_open = next_open_w.loc[dt, list(new_entries)]
                         ent_close = close_w.loc[nxt, list(new_entries)]
                         r_ent = (ent_close / ent_open.replace(0.0, np.nan) - 1.0).dropna()
-                        # Account for weekend gap on exited slice sold at Monday Open before rotation
                         if exited:
                             ex_open = next_open_w.loc[dt, list(exited)]
                             ex_prev = close_w.loc[dt, list(exited)]
@@ -549,6 +687,7 @@ def backtest_global_staggered(
     sharpe = float(port_w.mean() / port_w.std() * np.sqrt(52.0)) if port_w.std() > 0 else np.nan
 
     return {
+        "Model": model.lower(),
         "IC": float(ic_s.mean()) if len(ic_s) else np.nan,
         "IC_t_NW6": float(ev.newey_west_t(ic_s, lags=NW_LAGS)) if len(ic_s) >= 6 else np.nan,
         "Port_CAGR": cagr,
@@ -561,10 +700,7 @@ def backtest_global_staggered(
 
 
 def make_offline_demo_data(groups: dict) -> tuple:
-    """Fast vectorized deterministic synthetic multi-market dataset for offline testing and demos.
-
-    Returns (close_d, open_d, bench_d, fund_df).
-    """
+    """Fast vectorized deterministic synthetic multi-market dataset for offline testing and demos."""
     rng = np.random.default_rng(42)
     dates = pd.bdate_range("2022-01-03", periods=780)
     n_dates = len(dates)
@@ -580,7 +716,6 @@ def make_offline_demo_data(groups: dict) -> tuple:
     starts = 50.0 * (1 + (idx_arr % 4))
     prices = starts[None, :] * np.cumprod(1.0 + rets, axis=0)
     close_df = pd.DataFrame(prices, index=dates, columns=tickers)
-    # Realistic open prices with overnight gap around prior close
     overnight = rng.normal(0.0, 0.003, size=(n_dates, n_t))
     prev_close = np.vstack([starts[None, :], prices[:-1, :]])
     open_df = pd.DataFrame(prev_close * (1.0 + overnight), index=dates, columns=tickers)
@@ -593,7 +728,14 @@ def make_offline_demo_data(groups: dict) -> tuple:
         "dividend_yield": np.round(1.0 + (idx_arr % 7) * 1.1, 2),
         "PER": np.round(8.0 + (idx_arr % 6) * 4.5, 2),
         "PBR": np.round(0.8 + (idx_arr % 5) * 0.9, 2),
+        "ev_ebitda": np.round(5.0 + (idx_arr % 7) * 2.5, 2),
         "rev_growth": np.round(-0.05 + (idx_arr % 6) * 0.08, 3),
+        "earnings_growth": np.round(-0.08 + (idx_arr % 7) * 0.09, 3),
+        "roe": np.round(0.05 + (idx_arr % 6) * 0.05, 3),
+        "op_margin": np.round(0.06 + (idx_arr % 5) * 0.06, 3),
+        "gross_margin": np.round(0.20 + (idx_arr % 6) * 0.10, 3),
+        "fcf_yield": np.round(0.01 + (idx_arr % 6) * 0.02, 3),
+        "debt_to_equity": np.round(20.0 + (idx_arr % 5) * 35.0, 1),
     }).set_index("ticker")
     return close_df, open_df, bench, fund_df
 
@@ -605,14 +747,7 @@ def resolve_universe_selection(
     tickers_csv: str = "",
     benchmark_override: str = "",
 ) -> Tuple[dict, list, str, float, str, str, bool]:
-    """Resolve CLI flags into (groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_to_usd).
-
-    Fixes the unreachable standalone `--universe-file` bug:
-    - `--tickers ...` -> custom watchlist only.
-    - `--universe-file` WITHOUT `--market` -> rank ONLY the custom universe file.
-    - `--market X` (with optional `--universe-file` merge) -> rank market X.
-    - None specified -> defaults cleanly to GLOBAL.
-    """
+    """Resolve CLI flags into (groups, tickers, benchmark, cost, mkt_label, mkt_name, convert_to_usd)."""
     if tickers_csv.strip():
         custom_list = [t.strip() for t in tickers_csv.split(",") if t.strip()]
         groups = {"custom": tuple(custom_list)}
@@ -661,8 +796,9 @@ def load_membership_csv(path: Path) -> pd.DataFrame:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Snowball Global Equity v5 Multi-Factor Ranker & Backtester")
+    parser = argparse.ArgumentParser(description="Snowball Global Equity Multi-Factor Ranker & Backtester (v6/v5)")
     parser.add_argument("--market", default="", help=f"Market preset ({', '.join(list_markets())}; defaults to GLOBAL if omitted without --universe-file)")
+    parser.add_argument("--model", default="v6", choices=["v6", "v5"], help="Empirical scoring model (default: v6 6-pillar)")
     parser.add_argument("--industry", default="", help="Optional single industry filter (e.g. semiconductors_hardware)")
     parser.add_argument("--universe-file", type=Path, default=None, help="Standalone custom JSON universe file (or merged into --market if both provided)")
     parser.add_argument("--membership-csv", type=Path, default=None, help="Optional point-in-time historical constituent mask CSV to eliminate survivorship bias")
@@ -699,11 +835,11 @@ def main() -> None:
         mode_tag = f"LIVE ({mkt_name}, {len(close_d.columns)}/{len(tickers)} stocks{fx_note})"
 
     pf = compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
-    ranked = score_latest_global(pf, fund_df, groups)
+    ranked = score_latest_global(pf, fund_df, groups, model=args.model)
 
-    pd.set_option("display.width", 220)
-    pd.set_option("display.max_columns", 15)
-    print(f"=== Snowball Global v5 Ranking | {mkt_label} | {mode_tag} | Benchmark: {benchmark} ===")
+    pd.set_option("display.width", 240)
+    pd.set_option("display.max_columns", 18)
+    print(f"=== Snowball Global {args.model.upper()} Ranking | {mkt_label} | {mode_tag} | Benchmark: {benchmark} ===")
     print(ranked.head(args.top).round(3).to_string(index=False))
 
     if args.backtest:
@@ -713,8 +849,8 @@ def main() -> None:
                 "\n[NOTICE] Survivorship Bias Disclosure: Static current-day universe omits delisted stocks; "
                 "historical CAGR/Sharpe are upward-biased. Pass --membership-csv for point-in-time constituents."
             )
-        bt_res = backtest_global_staggered(pf, round_trip_cost=cost, membership_mask=mem_mask)
-        print("\n=== 4-Cohort Staggered Pure-Price v5 Backtest (ResMom + IndMom | Next-Day Open Fill) ===")
+        bt_res = backtest_global_staggered(pf, round_trip_cost=cost, membership_mask=mem_mask, model=args.model)
+        print(f"\n=== 4-Cohort Staggered Pure-Price {args.model.upper()} Backtest (Next-Day Open Fill) ===")
         for k, v in bt_res.items():
             if isinstance(v, float):
                 print(f"  {k:<12}: {v:.4f}")

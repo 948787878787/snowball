@@ -37,18 +37,20 @@ Expand the database anytime with `manage_universe.py`:
 .venv/bin/python skills/snowball/scripts/manage_universe.py --import-csv ./extra_stocks.csv
 ```
 
-## Core v5 Ranking Formula
+## Core Empirical Multi-Factor Formula (`v6` Default, `--model v5` Legacy)
 
-Every Friday close (point-in-time, zero look-ahead), cross-sectional z-scores (clipped to `±3.0`) are combined:
+Every Friday close (point-in-time, zero look-ahead, Next-Day Open execution, USD FX-normalized in `GLOBAL` mode), winsorized z-scores (`±3.0`) combine 6 peer-reviewed empirical pillars:
 
-`S_v5 = cs_z(0.5 * F_ResMom_26_4w + 0.5 * F_IndMom_Full_12w + 1.0 * F_Fund + 1.5 * F_NormVal)`
+`S_v6 = cs_z(0.20 * F_MomQual + 0.15 * F_IndMom + 0.25 * F_NormVal + 0.20 * F_Quality + 0.10 * F_Fund + 0.10 * F_LowRisk)`
 
-1. **`F_ResMom_26_4w`** (Residual Momentum, Blitz et al. 2011): 26-week skipping last 4-week cumulative Beta-adjusted alpha.
-2. **`F_IndMom_Full_12w`** (Full-Group Industry Momentum, Moskowitz & Grinblatt 1999): 12-week peer-group mean alpha (full-group inclusive to prevent small-group leave-one-out reversal bias).
-3. **`F_Fund`** (Fundamental Growth): Revenue growth YoY from Yahoo Finance globally (or point-in-time lagged monthly revenue YoY + acceleration in Taiwan via `backtest_v5.py`).
-4. **`F_NormVal`** (8%-Capped Industry-Neutral Value): Within-sector `1/PBR` (financials) or capped `1/PER` (`E/P <= 15%`) + `0.5 ×` capped dividend yield (`<= 8.0%`).
+1. **`F_MomQual` (20%)**: `0.75 ×` Volatility-Scaled Residual Momentum (Blitz, Huij, & Martens 2011 *JEF*; Barroso & Santa-Clara 2015 *JFE*) `+ 0.25 ×` Frog-in-the-Pan Continuous Information (`FIP`, Da, Gurun, & Warachka 2014 *RFS*).
+2. **`F_IndMom` (15%)**: Full-Group 12-week Industry Momentum (Moskowitz & Grinblatt 1999 *JF*; Ehsani & Linnainmaa 2022 *JF*).
+3. **`F_NormVal` (25%)**: Capital-structure-neutral within-industry value (`1/PBR` for financials; `0.5 × capped E/P + 0.5 × capped EBITDA/EV` for non-financials, Loughran & Wellman 2011 *JFQA*, strictly positive trailing P/E) `+ 0.5 ×` capped dividend yield (`<= 8.0%`, Boudoukh et al. 2007 *JF*).
+4. **`F_Quality` (20%)**: Within-industry `ROE`, Operating Margin, Gross Margin (Novy-Marx 2013 *JFE*; Fama & French 2015 *JFE*) `+` Cash-based `FCF Yield` (Ball et al. 2016 *JFE*) `-` non-financial leverage (`QMJ`, Asness, Frazzini, & Pedersen 2019 *RAST*).
+5. **`F_Fund` (10%)**: Revenue + Earnings growth YoY globally (or point-in-time lagged monthly revenue YoY + acceleration in Taiwan via `backtest_v5.py`).
+6. **`F_LowRisk` (10%)**: Betting Against Beta (Frazzini & Pedersen 2014 *JFE*) `+` Low Idiosyncratic Volatility (Ang et al. 2006 *JF*).
 
-Read [empirical-research-v5.md](./references/empirical-research-v5.md) for academic citations, audit tables, and survivorship-bias disclosures.
+Read [empirical-research-v5.md](./references/empirical-research-v5.md) for full LaTeX derivations, peer-reviewed citations, audit tables, and survivorship-bias disclosures.
 
 ## Workflow Steps
 

@@ -40,15 +40,63 @@ def test_global_v5_ranking_and_staggered_backtest_offline():
 
         assert len(ranked) == len(close_d.columns)
         assert len(ranked) >= 250
-        assert ranked["v5_score"].is_monotonic_decreasing
-        assert float(ranked["v5_score"].abs().max()) <= 3.0 + 1e-9
+        assert ranked["v6_score"].is_monotonic_decreasing
+        assert float(ranked["v6_score"].abs().max()) <= 3.0 + 1e-9
+        assert {"mom_qual", "fip", "ind_mom", "norm_val", "quality", "low_risk", "v5_score", "v6_score"}.issubset(ranked.columns)
 
-        bt = gr.backtest_global_staggered(pf, round_trip_cost=MARKET_CONFIG[mkt]["round_trip_cost"])
-        assert bt["Weeks"] > 50
-        assert bt["Execution"] == "Next-Day Open"
-        assert np.isfinite(bt["Port_CAGR"])
-        assert np.isfinite(bt["True_MDD"])
-        assert bt["True_MDD"] <= 0.0
+        bt_v6 = gr.backtest_global_staggered(pf, round_trip_cost=MARKET_CONFIG[mkt]["round_trip_cost"], model="v6")
+        assert bt_v6["Weeks"] > 50
+        assert bt_v6["Model"] == "v6"
+        assert bt_v6["Execution"] == "Next-Day Open"
+        assert np.isfinite(bt_v6["Port_CAGR"])
+        assert np.isfinite(bt_v6["True_MDD"])
+        assert bt_v6["True_MDD"] <= 0.0
+
+        bt_v5 = gr.backtest_global_staggered(pf, round_trip_cost=MARKET_CONFIG[mkt]["round_trip_cost"], model="v5")
+        assert bt_v5["Model"] == "v5"
+        assert np.isfinite(bt_v5["Port_CAGR"])
+
+
+def test_v6_fip_quality_and_low_risk_math():
+    # Construct 4 stocks over 160 trading days (~32 weeks):
+    # SMOOTH: rises steadily +1% every week (smooth Frog-in-the-Pan winner, low IVOL, low Beta)
+    # JUMPY : same ~22% total return via 1 lottery jump +25% and tiny weekly declines (bad FIP, high IVOL)
+    # VALUE_TRAP: low P/E but terrible ROE/margins/negative FCF and high leverage
+    # QUALITY_VAL: cheap EV/EBITDA + high ROE/margins/positive FCF + low debt
+    dates = pd.bdate_range("2023-01-02", periods=320)
+    rng = np.random.default_rng(7)
+    mkt_r = rng.normal(0.0003, 0.010, len(dates))
+    bench = pd.Series(100.0 * np.cumprod(1.0 + mkt_r), index=dates)
+
+    # Smooth stock: steady positive drift, low beta 0.5, tiny noise
+    r_smooth = 0.5 * mkt_r + 0.0012 + rng.normal(0.0, 0.002, len(dates))
+    # Jumpy stock: high beta 1.8, mostly tiny negative days plus 2 big lottery spikes
+    r_jumpy = 1.8 * mkt_r - 0.0008 + rng.normal(0.0, 0.015, len(dates))
+    r_jumpy[210] += 0.35
+    r_jumpy[240] += 0.25
+
+    close_d = pd.DataFrame({
+        "SMOOTH": 100.0 * np.cumprod(1.0 + r_smooth),
+        "JUMPY": 100.0 * np.cumprod(1.0 + r_jumpy),
+        "QUAL": 100.0 * np.cumprod(1.0 + 0.8 * mkt_r + 0.0005),
+        "TRAP": 100.0 * np.cumprod(1.0 + 1.2 * mkt_r + 0.0005),
+    }, index=dates)
+    groups = {"g1": ("SMOOTH", "JUMPY", "QUAL", "TRAP")}
+    pf = gr.compute_global_price_factors(close_d, bench, groups, open_d=close_d)
+
+    fund = pd.DataFrame([
+        {"ticker": "SMOOTH", "name": "Smooth", "dividend_yield": 2.0, "PER": 15.0, "PBR": 2.0, "ev_ebitda": 10.0, "rev_growth": 0.12, "earnings_growth": 0.15, "roe": 0.20, "op_margin": 0.20, "gross_margin": 0.50, "fcf_yield": 0.05, "debt_to_equity": 30.0},
+        {"ticker": "JUMPY",  "name": "Jumpy",  "dividend_yield": 2.0, "PER": 15.0, "PBR": 2.0, "ev_ebitda": 10.0, "rev_growth": 0.12, "earnings_growth": 0.15, "roe": 0.20, "op_margin": 0.20, "gross_margin": 0.50, "fcf_yield": 0.05, "debt_to_equity": 30.0},
+        {"ticker": "QUAL",   "name": "Qual",   "dividend_yield": 3.0, "PER": 12.0, "PBR": 2.0, "ev_ebitda": 7.0,  "rev_growth": 0.10, "earnings_growth": 0.12, "roe": 0.32, "op_margin": 0.28, "gross_margin": 0.65, "fcf_yield": 0.09, "debt_to_equity": 15.0},
+        {"ticker": "TRAP",   "name": "Trap",   "dividend_yield": 3.0, "PER": 12.0, "PBR": 2.0, "ev_ebitda": 25.0, "rev_growth": -0.10,"earnings_growth": -0.15,"roe": 0.01, "op_margin": 0.02, "gross_margin": 0.12, "fcf_yield": -0.05,"debt_to_equity": 280.0},
+    ]).set_index("ticker")
+
+    ranked = gr.score_latest_global(pf, fund, groups, model="v6").set_index("ticker")
+    assert ranked.loc["SMOOTH", "fip"] > ranked.loc["JUMPY", "fip"]
+    assert ranked.loc["SMOOTH", "low_risk"] > ranked.loc["JUMPY", "low_risk"]
+    assert ranked.loc["QUAL", "quality"] > ranked.loc["TRAP", "quality"]
+    assert ranked.loc["QUAL", "norm_val"] > ranked.loc["TRAP", "norm_val"]
+    assert ranked.loc["QUAL", "v6_score"] > ranked.loc["TRAP", "v6_score"]
 
 
 def test_dividend_yield_and_trailing_pe_parsers():
