@@ -17,19 +17,28 @@ import features as ft
 from panels import build_panels
 
 OUT_DIR = Path(__file__).parent / "results"
-PANEL_CACHE = Path(__file__).parent / "cache" / "panels.pkl"
 DESIGN = ("2020-01-01", "2023-12-31")
 HOLDOUT_START = "2024-01-01"
 SMOOTH_WEEKS = 4
 
 
-def load_panels() -> dict:
-    # Pickle is safe here: written locally by this script only.
-    if PANEL_CACHE.exists():
-        return pd.read_pickle(PANEL_CACHE)
-    p = build_panels(data.load_prices(), data.load_revenue(), data.load_valuation(), data.load_institutional())
-    pd.to_pickle(p, PANEL_CACHE)
-    return p
+def load_panels(force_refresh: bool = False) -> dict:
+    """Build or load cached weekly factor panels with TTL, schema-version, and universe-hash invalidation."""
+    def _build() -> dict:
+        return build_panels(
+            data.load_prices(force_refresh=force_refresh),
+            data.load_revenue(force_refresh=force_refresh),
+            data.load_valuation(force_refresh=force_refresh),
+            data.load_institutional(force_refresh=force_refresh),
+        )
+
+    return data.cached_load(
+        "panels",
+        _build,
+        ttl_seconds=data.DEFAULT_DAILY_TTL_SECONDS,
+        schema_version=f"{data.CACHE_SCHEMA_VERSION}-panels",
+        force_refresh=force_refresh,
+    )
 
 
 def candidates(p: dict) -> dict:

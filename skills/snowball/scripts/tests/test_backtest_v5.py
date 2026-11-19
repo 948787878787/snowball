@@ -156,3 +156,51 @@ def test_score_predictions_cli_brier_and_bss(tmp_path):
     assert stats["hits"] == 2
     assert stats["mean_brier"] < 0.25
     assert stats["bss"] > 0.0
+
+
+def test_versioned_ttl_cache_invalidation_and_fallback(tmp_path):
+    import pytest
+    import data
+
+    calls = {"n": 0}
+    clock = {"t": 1000.0}
+
+    def loader():
+        calls["n"] += 1
+        return {"run": calls["n"]}
+
+    # 1. Initial load populates cache; second load within TTL hits cache
+    r1 = data.cached_load("demo", loader, ttl_seconds=60.0, schema_version="v3", fingerprint="fp1", cache_dir=tmp_path, now_fn=lambda: clock["t"])
+    r2 = data.cached_load("demo", loader, ttl_seconds=60.0, schema_version="v3", fingerprint="fp1", cache_dir=tmp_path, now_fn=lambda: clock["t"] + 30.0)
+    assert r1 == {"run": 1} and r2 == {"run": 1} and calls["n"] == 1
+
+    # 2. Expired TTL triggers reload
+    clock["t"] += 120.0
+    r3 = data.cached_load("demo", loader, ttl_seconds=60.0, schema_version="v3", fingerprint="fp1", cache_dir=tmp_path, now_fn=lambda: clock["t"])
+    assert r3 == {"run": 2} and calls["n"] == 2
+
+    # 3. Schema version bump invalidates immediately even within TTL
+    r4 = data.cached_load("demo", loader, ttl_seconds=60.0, schema_version="v4", fingerprint="fp1", cache_dir=tmp_path, now_fn=lambda: clock["t"] + 5.0)
+    assert r4 == {"run": 3} and calls["n"] == 3
+
+    # 4. Universe fingerprint change invalidates immediately even within TTL
+    r5 = data.cached_load("demo", loader, ttl_seconds=60.0, schema_version="v4", fingerprint="fp2", cache_dir=tmp_path, now_fn=lambda: clock["t"] + 5.0)
+    assert r5 == {"run": 4} and calls["n"] == 4
+
+    # 5. Force refresh invalidates immediately
+    r6 = data.cached_load("demo", loader, ttl_seconds=60.0, schema_version="v4", fingerprint="fp2", force_refresh=True, cache_dir=tmp_path, now_fn=lambda: clock["t"] + 5.0)
+    assert r6 == {"run": 5} and calls["n"] == 5
+
+    # 6. Expired compatible cache falls back gracefully on transient error, but incompatible schema raises
+    def broken_loader():
+        raise RuntimeError("network offline")
+
+    r_stale = data.cached_load("demo", broken_loader, ttl_seconds=60.0, schema_version="v4", fingerprint="fp2", allow_stale_on_error=True, cache_dir=tmp_path, now_fn=lambda: clock["t"] + 500.0)
+    assert r_stale == {"run": 5}
+
+    with pytest.raises(RuntimeError):
+        data.cached_load("demo", broken_loader, ttl_seconds=60.0, schema_version="v5", fingerprint="fp2", allow_stale_on_error=True, cache_dir=tmp_path, now_fn=lambda: clock["t"] + 500.0)
+
+    # 7. Clear cache removes both .pkl and .meta.json
+    removed = data.clear_cache("demo", cache_dir=tmp_path)
+    assert removed == 2
