@@ -47,7 +47,7 @@ Every Friday close (point-in-time, zero look-ahead, Next-Day Open execution, USD
 2. **`F_IndMom` (15%)**: Full-Group 12-week Industry Momentum (Moskowitz & Grinblatt 1999 *JF*; Ehsani & Linnainmaa 2022 *JF*).
 3. **`F_NormVal` (25%)**: Capital-structure-neutral within-industry value (`1/PBR` for financials; `0.5 × capped E/P + 0.5 × capped EBITDA/EV` for non-financials, Loughran & Wellman 2011 *JFQA*, strictly positive trailing P/E) `+ 0.5 ×` capped dividend yield (`<= 8.0%`, Boudoukh et al. 2007 *JF*).
 4. **`F_Quality` (20%, Microeconomics)**: Lerner excess pricing-power markup (`GrossMargin - peer_median`, Lerner 1934 *RES*; De Loecker et al. 2020 *QJE*), within-industry `ROE` & Operating Margin (Novy-Marx 2013 *JFE*), `FCF/EV` (Ball et al. 2016 *JFE*), liquidity (`CurrentRatio`), minus non-financial leverage (`D/E`, Hou et al. 2015 *RFS*; `QMJ`).
-5. **`F_Fund` (10%)**: Revenue + Earnings growth YoY globally (or point-in-time lagged monthly revenue YoY + acceleration in Taiwan via `backtest_v5.py`).
+5. **`F_Fund` (10%, Growth & Sequoia Rule of 40)**: Within-industry `Rule of 40 = RevYoY + FCF Margin` (`rule40_%`) combined with Revenue + Earnings growth YoY globally (or point-in-time lagged monthly revenue YoY + acceleration in Taiwan via `backtest_v5.py`).
 6. **`F_LowRisk` (10%)**: Betting Against Beta (Frazzini & Pedersen 2014 *JFE*) `+` Low Idiosyncratic Volatility (Ang et al. 2006 *JF*).
 7. **Macroeconomic Regime Conditioning (`macro_micro.py`, strictly lagged `shift(1)`)**: Dynamically bounds and tilts pillar weights based on Yield Curve (`^TNX - ^IRX`), Credit Spreads (`HYG/IEF`), `^VIX`, USD (`DX-Y.NYB`), and Oil (`CL=F`) across Credit Stress, Rate/Inflation Shock, and Expansion regimes (disable with `--no-macro`).
 

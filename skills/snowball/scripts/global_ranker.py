@@ -321,8 +321,10 @@ def _fetch_one_fundamental(sym: str) -> dict:
     fcf = _safe_float(info.get("freeCashflow"))
     ev_val = _safe_float(info.get("enterpriseValue"), positive_only=True)
     mcap = _safe_float(info.get("marketCap"), positive_only=True)
+    total_rev = _safe_float(info.get("totalRevenue"), positive_only=True)
     denom = ev_val if np.isfinite(ev_val) else mcap
     fcf_yield = (fcf / denom) if (np.isfinite(fcf) and np.isfinite(denom) and denom > 0.0) else np.nan
+    fcf_margin = (fcf / total_rev) if (np.isfinite(fcf) and np.isfinite(total_rev) and total_rev > 0.0) else op_margin
 
     return {
         "ticker": sym,
@@ -339,6 +341,7 @@ def _fetch_one_fundamental(sym: str) -> dict:
         "op_margin": op_margin,
         "gross_margin": gross_margin,
         "fcf_yield": fcf_yield,
+        "fcf_margin": fcf_margin,
         "debt_to_equity": d2e,
         "current_ratio": curr_ratio,
     }
@@ -349,7 +352,7 @@ def fetch_global_fundamentals(tickers: list, max_workers: int = 8) -> pd.DataFra
     cols = [
         "name", "sector", "currency", "dividend_yield", "PER", "PBR", "ev_ebitda",
         "rev_growth", "earnings_growth", "roe", "op_margin", "gross_margin",
-        "fcf_yield", "debt_to_equity", "current_ratio",
+        "fcf_yield", "fcf_margin", "debt_to_equity", "current_ratio",
     ]
     if not tickers:
         return pd.DataFrame(columns=cols)
@@ -376,6 +379,7 @@ def make_neutral_fundamentals(tickers: list) -> pd.DataFrame:
         "op_margin": np.nan,
         "gross_margin": np.nan,
         "fcf_yield": np.nan,
+        "fcf_margin": np.nan,
         "debt_to_equity": np.nan,
         "current_ratio": np.nan,
     }).set_index("ticker")
@@ -504,7 +508,7 @@ def score_latest_global(
     f_low_risk = price_factors["f_low_risk"].loc[dt].reindex(tickers).fillna(0.0)
 
     fund = fundamentals.reindex(tickers)
-    for col in ("ev_ebitda", "earnings_growth", "roe", "op_margin", "gross_margin", "fcf_yield", "debt_to_equity", "current_ratio"):
+    for col in ("ev_ebitda", "earnings_growth", "roe", "op_margin", "gross_margin", "fcf_yield", "fcf_margin", "debt_to_equity", "current_ratio"):
         if col not in fund.columns:
             fund[col] = np.nan
 
@@ -554,11 +558,31 @@ def score_latest_global(
         0.30 * z_roe + 0.25 * z_opm + 0.25 * z_markup + 0.20 * z_fcf + 0.15 * z_liq - 0.20 * z_lev
     )
 
-    # Pillar: Fundamental Growth (Revenue YoY + Earnings YoY)
-    z_rev = _cs_z_series(fund["rev_growth"].clip(-0.5, 1.5))
+    # Pillar: Fundamental Growth & Sequoia Rule of 40 (RevYoY + FCF Margin)
+    rev_clip = fund["rev_growth"].clip(-0.5, 1.5)
+    fcf_m_src = pd.Series(
+        {
+            t: (
+                fund.loc[t, "op_margin"]
+                if gmap.get(t) in GLOBAL_PB_GROUPS
+                else (fund.loc[t, "fcf_margin"] if pd.notna(fund.loc[t, "fcf_margin"]) else fund.loc[t, "op_margin"])
+            )
+            for t in tickers
+        },
+        dtype=float,
+    ).clip(-0.5, 0.8)
+    rule_of_40_pct = (rev_clip + fcf_m_src) * 100.0
+    z_r40 = _group_z_series(rule_of_40_pct, groups)
+    z_rev = _cs_z_series(rev_clip)
     z_earn = _cs_z_series(fund["earnings_growth"].clip(-0.5, 1.5))
+    has_r40 = rule_of_40_pct.notna().any()
     has_earn = fund["earnings_growth"].notna().any()
-    f_fin = _cs_z_series(0.60 * z_rev + 0.40 * z_earn) if (model == "v6" and has_earn) else z_rev
+    if model == "v6" and has_r40:
+        f_fin = _cs_z_series(0.45 * z_r40 + 0.30 * z_rev + (0.25 * z_earn if has_earn else 0.0))
+    elif model == "v6" and has_earn:
+        f_fin = _cs_z_series(0.60 * z_rev + 0.40 * z_earn)
+    else:
+        f_fin = z_rev
 
     # Macroeconomic Regime-Conditioned Weights (strictly bounded, sums to 1.00)
     if macro_regime is not None:
@@ -592,6 +616,7 @@ def score_latest_global(
         "yield_%": fund["dividend_yield"].fillna(0.0).values,
         "PER": fund["PER"].values,
         "rev_yoy_%": (fund["rev_growth"] * 100.0).values,
+        "rule40_%": rule_of_40_pct.values,
         "mom_qual": f_mom_qual.values,
         "fip": f_fip.values,
         "ind_mom": f_ind.values,
@@ -777,6 +802,7 @@ def make_offline_demo_data(groups: dict) -> tuple:
         "op_margin": np.round(0.06 + (idx_arr % 5) * 0.06, 3),
         "gross_margin": np.round(0.20 + (idx_arr % 6) * 0.10, 3),
         "fcf_yield": np.round(0.01 + (idx_arr % 6) * 0.02, 3),
+        "fcf_margin": np.round(0.05 + (idx_arr % 6) * 0.05, 3),
         "debt_to_equity": np.round(20.0 + (idx_arr % 5) * 35.0, 1),
         "current_ratio": np.round(0.9 + (idx_arr % 5) * 0.45, 2),
     }).set_index("ticker")

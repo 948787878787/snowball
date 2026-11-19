@@ -146,6 +146,27 @@ def test_macro_regime_conditioning_and_micro_lerner_markup():
     assert np.isfinite(bt["Port_CAGR"]) and bt["Model"] == "v6"
 
 
+def test_sequoia_rule_of_40_rewards_capital_efficient_growth():
+    dates = pd.bdate_range("2023-01-02", periods=220)
+    mkt_r = np.full(len(dates), 0.0004)
+    bench = pd.Series(100.0 * np.cumprod(1.0 + mkt_r), index=dates)
+    close_d = pd.DataFrame(
+        {"EFFICIENT": 100.0 * np.cumprod(1.0 + mkt_r), "BURNER": 100.0 * np.cumprod(1.0 + mkt_r)},
+        index=dates,
+    )
+    groups = {"software_internet": ("EFFICIENT", "BURNER")}
+    pf = gr.compute_global_price_factors(close_d, bench, groups, open_d=close_d)
+    fund = pd.DataFrame([
+        {"ticker": "EFFICIENT", "name": "Eff", "dividend_yield": 0.0, "PER": 25.0, "PBR": 5.0, "ev_ebitda": 18.0, "rev_growth": 0.20, "earnings_growth": 0.20, "roe": 0.20, "op_margin": 0.20, "gross_margin": 0.70, "fcf_yield": 0.04, "fcf_margin": 0.25, "debt_to_equity": 30.0, "current_ratio": 2.0},
+        {"ticker": "BURNER",    "name": "Burn","dividend_yield": 0.0, "PER": 25.0, "PBR": 5.0, "ev_ebitda": 18.0, "rev_growth": 0.20, "earnings_growth": 0.20, "roe": 0.20, "op_margin": 0.20, "gross_margin": 0.70, "fcf_yield": 0.04, "fcf_margin": -0.15,"debt_to_equity": 30.0, "current_ratio": 2.0},
+    ]).set_index("ticker")
+
+    ranked = gr.score_latest_global(pf, fund, groups, model="v6").set_index("ticker")
+    assert abs(ranked.loc["EFFICIENT", "rule40_%"] - 45.0) < 1e-6
+    assert abs(ranked.loc["BURNER", "rule40_%"] - 5.0) < 1e-6
+    assert ranked.loc["EFFICIENT", "v6_score"] > ranked.loc["BURNER", "v6_score"]
+
+
 def test_dividend_yield_and_trailing_pe_parsers():
     # Bug #2: Yahoo 2025 dividendYield=0.42 means 0.42%, NEVER 42% (capped to 8%)
     aapl_full = {

@@ -45,7 +45,7 @@
   - **全組產業動能（`F_IndMom`，15%）**：12 週同業全組平均 alpha（Moskowitz & Grinblatt 1999 *JF*；Ehsani & Linnainmaa 2022 *JF*），消除小組排除自己造成的機械性反轉。
   - **資本結構中性複合價值（`F_NormVal`，25%）**：金融股採組內 `1/PBR`，非金融股採組內 `0.5 × 盈餘殖利率（嚴格 Trailing P/E，上限 15%）+ 0.5 × EBITDA/EV（上限 25%）`（Loughran & Wellman 2011 *JFQA*），搭配 `0.5 ×` 上限 `8.0%` 封頂殖利率（Boudoukh et al. 2007 *JF*）。
   - **個體經濟護城河與資本紀律（`F_Quality`，20%）**：納入勒納超額毛利定價權（`毛利率 − 同業中位數`，Lerner 1934 *RES*；De Loecker, Eeckhout, & Unger 2020 *QJE*）、組內 `ROE` 與營業利益率（Novy-Marx 2013 *JFE*）、自由現金流殖利率 `FCF/EV`（Ball et al. 2016 *JFE*）、非金融流動比率（`CurrentRatio`）並扣除高槓桿負債比（Hou, Xue, & Zhang 2015 *RFS*；`QMJ`，Asness et al. 2019 *RAST*）。
-  - **基本面成長（`F_Fund`，10%）**：全球採營收＋盈餘年增率，台股回測採嚴格延後至次月 11 日的點對點月營收動能與加速度。
+  - **基本面成長與紅杉 Rule of 40（`F_Fund`，10%）**：全球納入組內標準化 **Rule of 40（`營收年增率 + 自由現金流利潤率`，並直接輸出 `rule40_%` 欄位）** 搭配營收與盈餘年增率，過濾無效燒錢成長；台股回測採嚴格延後至次月 11 日的點對點月營收動能與加速度。
   - **防禦低風險（`F_LowRisk`，10%）**：對抗高 Beta（Betting Against Beta，Frazzini & Pedersen 2014 *JFE*）結合低特異波動率（Ang et al. 2006 *JF*），降低空頭回撤與動能崩盤風險。
   - **總體經濟情境動態調節（`macro_micro.py`，嚴格滯後 `shift(1)` 防偷看）**：監控美債殖利率曲線（`^TNX - ^IRX`）、高收益信用利差（`HYG/IEF`）、波動率（`^VIX`）、美元流動性（`DX-Y.NYB`）與原油通膨衝擊（`CL=F`），在信用緊縮、升息通膨與景氣擴張三類總經情境間平滑調整六大支柱權重（Estrella & Mishkin 1998 *REStat*；Gilchrist & Zakrajšek 2012 *AER*；Bruno & Shin 2015 *RES*；Kilian 2009 *AER*）。
 - **機構級嚴格回測審計**：採用 4 組錯開一週的重疊子組合（Jegadeesh-Titman 4-Cohort）、真實每週盯市最大回撤（MDD）、Newey-West（`lags = 6`）t 檢定、對含息等權大盤的 Jensen's Alpha，以及含 `0.30%` 零股滑價＋手續費＋證交稅的個人現金流模擬器。

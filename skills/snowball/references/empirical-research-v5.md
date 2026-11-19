@@ -75,8 +75,10 @@ Grounded in Industrial Organization (**Lerner 1934** *RES*; **De Loecker, Eeckho
 
 $$F_{\text{Quality}}(i,t) = z_{\text{cs}}\!\Big(0.30\,z_{\text{ind}}(\text{ROE}_i) + 0.25\,z_{\text{ind}}(\text{OpMargin}_i) + 0.25\,z_{\text{cs}}(\Delta\text{GM}_i) + 0.20\,z_{\text{cs}}(\text{FCF/EV}_i) + 0.15\,z_{\text{non-fin}}(\text{CurrentRatio}_i) - 0.20\,z_{\text{non-fin}}(\text{D/E}_i)\Big)$$
 
-### Pillar 5 — Fundamental Growth (`F_Fund`, Weight = `0.10`)
-- Global live ranking (`global_ranker.py`): $F_{\text{Fund}} = z_{\text{cs}}\!\big(0.60\,z_{\text{cs}}(\text{RevYoY}_i) + 0.40\,z_{\text{cs}}(\text{EarnYoY}_i)\big)$ (clipped to $[-50\%, +150\%]$).
+### Pillar 5 — Fundamental Growth & Sequoia Rule of 40 (`F_Fund`, Weight = `0.10`)
+- **Rule of 40 Capital-Efficient Growth**: $\text{RuleOf40}_i = (\text{RevYoY}_i + \text{FCFMargin}_i) \times 100$ (financials use `OpMargin` in place of `FCFMargin`; standardized within peer group $z_{\text{ind}}$ so every sector rewards capital-efficient compounders rather than cash-burning growth).
+- Global live ranking (`global_ranker.py`):
+  $$F_{\text{Fund}}(i,t) = z_{\text{cs}}\!\Big(0.45\,z_{\text{ind}}(\text{RuleOf40}_i) + 0.30\,z_{\text{cs}}(\text{RevYoY}_i) + 0.25\,z_{\text{cs}}(\text{EarnYoY}_i)\Big)$$
 - Taiwan point-in-time backtest (`backtest_v5.py`): trailing 3-month revenue YoY + 3-month acceleration strictly lagged to the 11th of the following month.
 
 ### Pillar 6 — Defensive Low-Risk (`F_LowRisk`, Weight = `0.10`)
