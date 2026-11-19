@@ -288,6 +288,32 @@
         </div>
       </div>
 
+      <!-- Minimal 3-Field Quick-Add Stock Bar (Ticker / Lots / Avg Cost) -->
+      <form id="add-hold-form" onsubmit="addHoldingFromForm(event)" autocomplete="off" class="glass-sub rounded-2xl p-3.5 space-y-2">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+          <div class="sm:col-span-4 space-y-1">
+            <label id="lbl-add-code" for="add-code" class="block text-xs font-medium text-[var(--muted-foreground)]">Ticker</label>
+            <input id="add-code" list="quick-ticker-list" oninput="updateAddPreview()" required placeholder="2330 / AAPL"
+              class="w-full glass tint-ring rounded-xl px-3 py-1.5 text-xs text-[var(--foreground)]" />
+            <datalist id="quick-ticker-list"></datalist>
+          </div>
+          <div class="sm:col-span-3 space-y-1">
+            <label id="lbl-add-lots" for="add-lots" class="block text-xs font-medium text-[var(--muted-foreground)]">Lots / Shares</label>
+            <input id="add-lots" type="number" step="any" min="0.0001" required placeholder="1 / 0.5"
+              class="w-full glass tint-ring rounded-xl px-3 py-1.5 text-xs text-[var(--foreground)] tabular-nums" />
+          </div>
+          <div class="sm:col-span-3 space-y-1">
+            <label id="lbl-add-cost" for="add-cost" class="block text-xs font-medium text-[var(--muted-foreground)]">Avg Cost</label>
+            <input id="add-cost" type="number" step="any" min="0.0001" required placeholder="1020 / 220"
+              class="w-full glass tint-ring rounded-xl px-3 py-1.5 text-xs text-[var(--foreground)] tabular-nums" />
+          </div>
+          <div class="sm:col-span-2">
+            <button id="btn-add-hold" type="submit" class="w-full tint-btn-active rounded-xl px-3 py-1.5 text-xs font-semibold hover:opacity-90 transition cursor-pointer">+ Add</button>
+          </div>
+        </div>
+        <div id="add-preview" class="text-xs text-[var(--muted-foreground)]">TW: 1 lot = 1,000 shares (decimals supported) · US: enter shares · native currency avg cost</div>
+      </form>
+
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse text-sm tabular-nums">
           <thead>
@@ -721,6 +747,128 @@
       return CURRENCY_META[c] ? CURRENCY_META[c].perUsd : 1.0;
     }
 
+    const ADD_I18N = {
+      en: { code: "Ticker", lots: "Lots (TW) / Shares (US)", cost: "Avg Cost", btn: "+ Add", hint: "TW: 1 lot = 1,000 shares (decimals ok) · US: shares · auto-merges duplicates", codePh: "2330 / AAPL / BRK-B", lotsPh: "1 or 0.5", costPh: "1020 or 220", customAct: "Custom holding · tracked in local browser" },
+      zh: { code: "股票代碼", lots: "張數（台股1張=1000股 / 美股股數）", cost: "均價（原幣）", btn: "+ 加入", hint: "台股填張數（支援小數零股如 0.5）、美股填股數；重複代碼自動加權合併並保存", codePh: "2330 / 2204 / AAPL", lotsPh: "1 或 0.5", costPh: "1020 或 220", customAct: "自訂持股 · 已保存於本機瀏覽器" },
+      ja: { code: "銘柄コード", lots: "枚数(台) / 株数(米)", cost: "平均単価", btn: "+ 追加", hint: "台湾株は1枚=1000株(小数可)・米国株は株数；同一銘柄は加重平均で統合", codePh: "2330 / AAPL", lotsPh: "1 / 0.5", costPh: "1020 / 220", customAct: "カスタム保有 · ブラウザ保存済み" },
+      ko: { code: "종목코드", lots: "수량(대만 장 / 미국 주)", cost: "평균단가", btn: "+ 추가", hint: "대만 1장=1,000주(소수 가능) · 미국 주수 입력 · 동일 종목 자동 합산", codePh: "2330 / AAPL", lotsPh: "1 / 0.5", costPh: "1020 / 220", customAct: "사용자 종목 · 로컬 저장됨" },
+      de: { code: "Ticker", lots: "Lots (TW) / Stück (US)", cost: "Ø-Kurs", btn: "+ Hinzufügen", hint: "TW: 1 Lot = 1.000 Stk. · US: Stückzahl · Duplikate werden gewichtet vereint", codePh: "2330 / AAPL", lotsPh: "1 / 0.5", costPh: "1020 / 220", customAct: "Eigene Position · lokal gespeichert" }
+    };
+
+    const QUICK_V6_LOOKUP = {
+      "2330": { name: "TSMC", mkt: "TW", currency: "TWD", price: 2030.9, v6: -0.20, pct: 53.0 },
+      "2317": { name: "Hon Hai", mkt: "TW", currency: "TWD", price: 213.2, v6: -0.09, pct: 46.9 },
+      "2454": { name: "MediaTek", mkt: "TW", currency: "TWD", price: 3597.5, v6: -1.11, pct: 88.6 },
+      "2881": { name: "Fubon Fin", mkt: "TW", currency: "TWD", price: 143.1, v6: 1.40, pct: 10.0 },
+      "2884": { name: "E.SUN Fin", mkt: "TW", currency: "TWD", price: 39.0, v6: 2.12, pct: 3.8 },
+      "2891": { name: "CTBC Fin", mkt: "TW", currency: "TWD", price: 70.7, v6: 1.64, pct: 8.6 },
+      "2412": { name: "Chunghwa Tel", mkt: "TW", currency: "TWD", price: 160.5, v6: 1.01, pct: 15.2 },
+      "2603": { name: "Evergreen", mkt: "TW", currency: "TWD", price: 238.9, v6: 1.61, pct: 8.8 },
+      "2204": { name: "China Motor", mkt: "TW", currency: "TWD", price: 47.1, v6: 0.06, pct: 40.9 },
+      "4736": { name: "Taidoc", mkt: "TW", currency: "TWD", price: 117.5, v6: 3.00, pct: 0.3 },
+      "AAPL": { name: "Apple", mkt: "US", currency: "USD", price: 352.45, v6: 1.19, pct: 13.2 },
+      "MSFT": { name: "Microsoft", mkt: "US", currency: "USD", price: 508.29, v6: -0.19, pct: 54.9 },
+      "NVDA": { name: "NVIDIA", mkt: "US", currency: "USD", price: 150.96, v6: 0.75, pct: 19.8 },
+      "GOOGL": { name: "Alphabet", mkt: "US", currency: "USD", price: 282.44, v6: -0.34, pct: 62.2 },
+      "AMZN": { name: "Amazon", mkt: "US", currency: "USD", price: 267.74, v6: 0.25, pct: 37.3 },
+      "META": { name: "Meta", mkt: "US", currency: "USD", price: 616.38, v6: 0.16, pct: 40.9 },
+      "TSLA": { name: "Tesla", mkt: "US", currency: "USD", price: 383.72, v6: -2.39, pct: 99.4 },
+      "BRK-B": { name: "Berkshire B", mkt: "US", currency: "USD", price: 574.62, v6: 3.00, pct: 0.3 },
+      "LLY": { name: "Eli Lilly", mkt: "US", currency: "USD", price: 1382.75, v6: 1.31, pct: 10.6 },
+      "NTNX": { name: "Nutanix", mkt: "US", currency: "USD", price: 57.36, v6: 3.00, pct: 0.3 }
+    };
+
+    function AL() { return ADD_I18N[state.lang] || ADD_I18N.en; }
+
+    function resolveQuickTicker(raw) {
+      const s = String(raw || "").trim().toUpperCase();
+      if (!s) return null;
+      const bare = s.replace(/\.TWO?$/, "");
+      if (QUICK_V6_LOOKUP[bare]) return { code: bare, ...QUICK_V6_LOOKUP[bare], matched: true };
+      const dash = s.replace(".", "-");
+      if (QUICK_V6_LOOKUP[dash]) return { code: dash, ...QUICK_V6_LOOKUP[dash], matched: true };
+      const isTw = /^\d{4,6}[A-Z]?(\.TWO?)?$/.test(s);
+      return { code: isTw ? bare : s, name: "", mkt: isTw ? "TW" : "US", currency: isTw ? "TWD" : "USD", price: null, v6: null, pct: null, matched: false };
+    }
+
+    function populateQuickList() {
+      const dl = document.getElementById("quick-ticker-list");
+      if (!dl) return;
+      dl.innerHTML = Object.entries(QUICK_V6_LOOKUP).map(([k, v]) => {
+        const sym = v.currency === "TWD" ? "NT$" : "$";
+        return `<option value="${k}">${v.name} (${v.mkt}) · ${sym}${v.price} · v6 Top ${v.pct}%</option>`;
+      }).join("");
+    }
+
+    function updateAddPreview() {
+      const el = document.getElementById("add-preview");
+      if (!el) return;
+      const info = resolveQuickTicker(document.getElementById("add-code").value);
+      if (!info) { el.textContent = AL().hint; el.className = "text-xs text-[var(--muted-foreground)]"; return; }
+      if (info.matched) {
+        const sym = info.currency === "TWD" ? "NT$" : "$";
+        el.textContent = `✓ ${info.code} ${info.name} (${info.mkt}) · ${sym}${info.price} · v6 PIT=${info.v6 >= 0 ? "+" : ""}${info.v6.toFixed(2)} (Top ${info.pct}%)`;
+        el.className = "text-xs tint-text font-medium";
+      } else {
+        el.textContent = `ℹ ${info.code} (${info.mkt}) · ${AL().customAct}`;
+        el.className = "text-xs text-[var(--muted-foreground)]";
+      }
+    }
+
+    function addHoldingFromForm(e) {
+      if (e) e.preventDefault();
+      const rawCode = document.getElementById("add-code").value;
+      const lots = parseFloat(document.getElementById("add-lots").value);
+      const cost = parseFloat(document.getElementById("add-cost").value);
+      const info = resolveQuickTicker(rawCode);
+      if (!info || !(lots > 0) || !(cost > 0)) return;
+      const addShares = info.mkt === "TW" ? Number((lots * 1000).toFixed(2)) : Number(lots.toFixed(4));
+      state.deletedCodes = (state.deletedCodes || []).filter(c => c !== info.code);
+      const existing = state.holdings.find(x => x.code.toUpperCase() === info.code.toUpperCase());
+      if (existing) {
+        const totalShares = existing.shares + addShares;
+        existing.cost = Number(((existing.shares * existing.cost + addShares * cost) / totalShares).toFixed(4));
+        existing.shares = Number(totalShares.toFixed(4));
+      } else {
+        let tag = "Hold", action = AL().customAct;
+        if (info.pct !== null) {
+          if (info.pct <= 20) { tag = "Buy DCA"; action = `v6 PIT Top ${info.pct}% (z=${info.v6 >= 0 ? "+" : ""}${info.v6.toFixed(2)})`; }
+          else if (info.pct <= 40) { tag = "Hold"; action = `v6 PIT Top ${info.pct}% (z=${info.v6 >= 0 ? "+" : ""}${info.v6.toFixed(2)})`; }
+          else { tag = "Freeze"; action = `v6 PIT Top ${info.pct}% (z=${info.v6 >= 0 ? "+" : ""}${info.v6.toFixed(2)})`; }
+        }
+        state.holdings.push({
+          code: info.code,
+          name: info.name || info.code,
+          mkt: info.mkt,
+          currency: info.currency,
+          shares: addShares,
+          cost: Number(cost.toFixed(4)),
+          price: info.price !== null ? info.price : Number(cost.toFixed(4)),
+          sellList: false,
+          tag,
+          action,
+          custom: true
+        });
+      }
+      saveState();
+      renderKPIs();
+      renderHoldings();
+      renderCompounding();
+      document.getElementById("add-hold-form").reset();
+      updateAddPreview();
+      document.getElementById("add-code").focus();
+    }
+
+    function removeHold(code) {
+      state.holdings = state.holdings.filter(x => x.code !== code);
+      if (!state.deletedCodes) state.deletedCodes = [];
+      if (!state.deletedCodes.includes(code)) state.deletedCodes.push(code);
+      saveState();
+      renderKPIs();
+      renderHoldings();
+      renderCompounding();
+    }
+
     const _initMonthlyCur = (DASHBOARD_DATA.defaultMonthlyCurrency || DASHBOARD_DATA.defaultCurrency || "USD").toUpperCase();
     let state = {
       lang: DASHBOARD_DATA.defaultLang || "en",
@@ -732,6 +880,7 @@
       filter: "ALL",
       editMode: false,
       doneTasks: {},
+      deletedCodes: [],
       holdings: JSON.parse(JSON.stringify(DASHBOARD_DATA.holdings || []))
     };
 
@@ -760,12 +909,25 @@
         if (typeof s.extraUsd === "number") state.extraUsd = s.extraUsd;
         if (typeof s.rate === "number") state.rate = s.rate;
         if (s.doneTasks) state.doneTasks = s.doneTasks;
+        if (Array.isArray(s.deletedCodes)) state.deletedCodes = s.deletedCodes;
         if (Array.isArray(s.holdings)) {
-          const map = Object.fromEntries(s.holdings.map(x => [x.code, x]));
-          state.holdings = (DASHBOARD_DATA.holdings || []).map(live => {
-            const m = map[live.code];
-            return m ? { ...live, shares: m.shares, cost: m.cost } : { ...live };
+          const delSet = new Set(state.deletedCodes || []);
+          const savedMap = Object.fromEntries(s.holdings.map(x => [x.code, x]));
+          const baseCodes = new Set();
+          const merged = [];
+          (DASHBOARD_DATA.holdings || []).forEach(live => {
+            baseCodes.add(live.code);
+            if (delSet.has(live.code)) return;
+            const m = savedMap[live.code];
+            merged.push(m ? { ...live, shares: m.shares, cost: m.cost } : { ...live });
           });
+          s.holdings.forEach(m => {
+            if (!baseCodes.has(m.code) && !delSet.has(m.code)) {
+              const q = resolveQuickTicker(m.code);
+              merged.push({ ...m, price: (q && q.price !== null) ? q.price : (m.price || m.cost), custom: true });
+            }
+          });
+          state.holdings = merged;
         }
       } catch (e) {}
     }
@@ -780,7 +942,8 @@
           extraUsd: state.extraUsd,
           rate: state.rate,
           doneTasks: state.doneTasks,
-          holdings: state.holdings.map(h => ({ code: h.code, shares: h.shares, cost: h.cost }))
+          deletedCodes: state.deletedCodes || [],
+          holdings: state.holdings.map(h => h.custom ? { ...h } : { code: h.code, shares: h.shares, cost: h.cost })
         }));
       } catch (e) {}
     }
@@ -910,6 +1073,15 @@
       document.getElementById("th-cval").textContent = tr.thCval;
       document.getElementById("th-cnet").textContent = tr.thCnet;
       document.getElementById("th-cdiv").textContent = tr.thCdiv;
+      const al = AL();
+      document.getElementById("lbl-add-code").textContent = al.code;
+      document.getElementById("lbl-add-lots").textContent = al.lots;
+      document.getElementById("lbl-add-cost").textContent = al.cost;
+      document.getElementById("btn-add-hold").textContent = al.btn;
+      document.getElementById("add-code").placeholder = al.codePh;
+      document.getElementById("add-lots").placeholder = al.lotsPh;
+      document.getElementById("add-cost").placeholder = al.costPh;
+      updateAddPreview();
     }
 
     function renderKPIs() {
@@ -1036,6 +1208,9 @@
           ? `<input type="number" step="0.01" value="${h.cost}" onchange="editHold('${h.code}','cost',this.value)" class="w-20 text-right glass-sub tint-ring rounded-lg px-1.5 py-0.5 text-xs" />`
           : `${curr}${h.cost.toFixed(2)}`;
         const tagText = tr.tags[h.tag] || h.tag;
+        const delBtn = state.editMode
+          ? `<button onclick="removeHold('${h.code}')" title="Remove" class="ml-2 px-1.5 py-0.5 rounded-lg text-xs glass-sub text-rose-500 hover:opacity-80 cursor-pointer">✕</button>`
+          : "";
         return `
           <tr class="hover:bg-[var(--glass-sub)] transition">
             <td class="py-3 pr-3"><div class="font-semibold">${h.code} ${h.name}</div><div class="text-xs text-[var(--muted-foreground)]">${h.mkt}</div></td>
@@ -1045,7 +1220,7 @@
             <td class="py-3 px-2 text-right font-semibold ${pct >= 0 ? "text-emerald-500" : "text-rose-500"}">${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</td>
             <td class="py-3 pl-3">
               <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium mr-1.5 ${tagColor[h.tag] || tagColor["凍結"]}">${tagText}</span>
-              <span class="text-xs text-[var(--muted-foreground)]">${h.action}</span>
+              <span class="text-xs text-[var(--muted-foreground)]">${h.action}</span>${delBtn}
             </td>
           </tr>
         `;
@@ -1152,6 +1327,7 @@
     }
 
     function init() {
+      populateQuickList();
       document.getElementById("in-rate").value = state.rate;
       setTint(state.tint);
       setCurrency(state.currency);
