@@ -108,3 +108,12 @@ Build a strictly leak-free Point-in-Time multi-market panel (Next-Day Open label
 .venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --learned-weights ./snowball_artifacts/v6_learned_weights.json --top 20
 ```
 Ready-to-upload Kaggle notebook: `notebooks/snowball_kaggle_train.ipynb`.
+
+### 7. Safe Paper-Trading & Broker API Execution (`broker_exec.py`)
+Connect Snowball rankings to **US Alpaca Paper Trading** (`https://paper-api.alpaca.markets`) or **TW SinoPac Shioaji Simulation** (`simulation=True`) with 4 pre-trade safety locks (dry-run default, hard live-order env lock, single-order / daily-notional / position-weight / kill-switch risk limits, and deterministic `client_order_id` anti-duplicate ledger):
+```bash
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker alpaca --mode dry_run --cash 1500 --offline-demo
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker alpaca --mode paper --cash 1500 --learned-weights ./snowball_artifacts/v6_learned_weights.json
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker shioaji --mode paper --cash 50000 --learned-weights ./snowball_artifacts/v6_learned_weights.json
+```
+Credentials template: [broker.env.example](./references/broker.env.example).

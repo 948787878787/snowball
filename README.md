@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. Run offline unit test suite (52 tests)
+# 2. Run offline unit test suite (59 tests)
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. Rank & backtest ANY global market (US / EU / JP / HK / TW / GLOBAL / custom tickers)
@@ -130,6 +130,13 @@ cp skills/snowball/references/portfolio-template.json ./my_portfolio.json
 
 # 6. Evaluate probabilistic forecasts (Brier Score & BSS)
 .venv/bin/python skills/snowball/scripts/score_predictions.py --csv ./my_predictions.csv
+
+# 7. Safe Paper-Trading & Broker Execution (US Alpaca Paper + TW SinoPac Shioaji Simulation)
+# Dry-run safety test (zero network, prints validated limit orders & audit log):
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker alpaca --mode dry_run --cash 1500 --offline-demo
+# Paper Trading (export ALPACA_API_KEY / ALPACA_SECRET_KEY or SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY first):
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker alpaca --mode paper --cash 1500 --learned-weights ./snowball_artifacts/v6_learned_weights.json
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker shioaji --mode paper --cash 50000 --learned-weights ./snowball_artifacts/v6_learned_weights.json
 ```
 
 ---

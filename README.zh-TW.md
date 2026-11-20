@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. 執行離線單元測試（共 52 項測試）
+# 2. 執行離線單元測試（共 59 項測試）
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. 排序與回測全球任意股市（US / EU / JP / HK / TW / GLOBAL / 自訂代碼）
@@ -130,6 +130,13 @@ cp skills/snowball/references/portfolio-template.json ./my_portfolio.json
 
 # 6. 計算預測紀錄命中率與 Brier Score / BSS
 .venv/bin/python skills/snowball/scripts/score_predictions.py --csv ./my_predictions.csv
+
+# 7. 安全模擬盤與券商 API 下單框架（美股 Alpaca Paper + 台股永豐 Shioaji 模擬環境）
+# 零風險本地演練（驗證限價單、風控上限與稽核紀錄）：
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker alpaca --mode dry_run --cash 1500 --offline-demo
+# 模擬盤下單（請先依 skills/snowball/references/broker.env.example 設定環境變數）：
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker alpaca --mode paper --cash 1500 --learned-weights ./snowball_artifacts/v6_learned_weights.json
+.venv/bin/python skills/snowball/scripts/broker_exec.py --broker shioaji --mode paper --cash 50000 --learned-weights ./snowball_artifacts/v6_learned_weights.json
 ```
 
 ---

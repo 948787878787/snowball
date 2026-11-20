@@ -9,9 +9,15 @@ cache/
 results/
 *.pkl
 
-# Personal portfolio files & private logs (NEVER commit!)
+# Personal portfolio files, broker credentials & private logs (NEVER commit!)
 my_portfolio.json
 portfolio.json
 預測紀錄.csv
 *.local.json
+.env
+*.env
+*.pfx
+execution_ledger*.json
+order_audit_*.json
+.snowball_kill_switch
 .DS_Store
