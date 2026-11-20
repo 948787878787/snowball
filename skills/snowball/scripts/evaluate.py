@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-from scipy.stats import spearmanr
+from scipy.stats import norm, spearmanr
 
 COIN_FLIP_BRIER = 0.25
 
@@ -95,3 +95,34 @@ def long_short(signal: pd.DataFrame, target: pd.DataFrame, frac: float = 0.2) ->
         order = a[m].sort_values().index
         out[dt] = b[order[-k:]].mean() - b[order[:k]].mean()
     return pd.Series(out, dtype=float)
+
+
+def deflated_sharpe_ratio(
+    sharpe: float,
+    n_trials: int,
+    n_obs: int,
+    skew: float = 0.0,
+    kurt: float = 3.0,
+    periods_per_year: float = 52.0,
+) -> float:
+    """Bailey & Lopez de Prado (2014) Deflated Sharpe Ratio (probability true SR > 0 after selection bias).
+
+    Converts annualized `sharpe` to per-period SR, computes expected maximum null SR across `n_trials`,
+    and returns P(SR_hat > SR_0) in [0, 1].
+    """
+    if not np.isfinite(sharpe) or n_obs < 4 or n_trials < 1:
+        return float("nan")
+    sr_per = float(sharpe) / np.sqrt(periods_per_year)
+    if n_trials <= 1:
+        sr_star = 0.0
+    else:
+        euler_gamma = 0.5772156649015329
+        z1 = norm.ppf(1.0 - 1.0 / n_trials)
+        z2 = norm.ppf(1.0 - 1.0 / (n_trials * np.e))
+        # Null standard deviation of per-period SR estimates ~ 1 / sqrt(n_obs - 1)
+        sr_std_null = 1.0 / np.sqrt(max(n_obs - 1, 1))
+        sr_star = sr_std_null * ((1.0 - euler_gamma) * z1 + euler_gamma * z2)
+
+    denom_var = max(1.0 - skew * sr_per + ((kurt - 1.0) / 4.0) * (sr_per ** 2), 1e-9)
+    z_stat = (sr_per - sr_star) * np.sqrt(max(n_obs - 1, 1)) / np.sqrt(denom_var)
+    return float(norm.cdf(z_stat))

@@ -463,6 +463,7 @@ def build_combined_panel(
     demo_days: int = 1040,
     pit_fundamentals_csv: Optional[Path] = None,
     batch_size: int = 150,
+    membership_mask: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Build combined Point-in-Time multi-market training panel (default: US 1,000 + TW 1,000 = 2,000 stocks)."""
     mkt_list = [m.strip().upper() for m in markets if m.strip()]
@@ -528,10 +529,17 @@ def build_combined_panel(
 
     panel = pd.concat(market_frames, ignore_index=True)
 
-    # Also compute global cross-sectional rank across ALL combined markets per date
+    if membership_mask is not None and not membership_mask.empty:
+        from portfolio_sim import _apply_membership_mask
+        panel = _apply_membership_mask(panel, membership_mask)
+
+    # Compute cross-sectional ranks (recomputed cleanly after any PIT membership_mask filtering)
     for h in horizons:
         col = f"fwd_vol_adj_{h}w"
         if col in panel.columns:
+            panel[f"target_rank_mkt_{h}w"] = (
+                panel.groupby(["date", "market"])[col].rank(pct=True).astype(np.float32)
+            )
             panel[f"target_rank_global_{h}w"] = (
                 panel.groupby("date")[col].rank(pct=True).astype(np.float32)
             )
@@ -562,6 +570,7 @@ def main() -> None:
     parser.add_argument("--horizons", default="4,12", help="Forward target horizons in weeks (default: 4,12)")
     parser.add_argument("--batch-size", type=int, default=150, help="Yahoo Finance download chunk size (default: 150)")
     parser.add_argument("--pit-fundamentals-csv", type=Path, default=None, help="Optional Point-in-Time historical fundamentals CSV")
+    parser.add_argument("--membership-csv", type=Path, default=None, help="Optional point-in-time constituent mask CSV")
     parser.add_argument("--output", type=Path, default=Path("kaggle_dataset/snowball_us_tw_2000.parquet"), help="Output file path (.parquet or .csv.gz)")
     parser.add_argument("--kaggle-slug", default="", help="Optional '<username>/snowball-us-tw-2000' to emit dataset-metadata.json")
     parser.add_argument("--offline-demo", action="store_true", help="Build synthetic 2,000-stock panel offline for testing")
@@ -570,6 +579,7 @@ def main() -> None:
 
     markets = [m.strip().upper() for m in args.markets.split(",") if m.strip()]
     horizons = tuple(int(h.strip()) for h in args.horizons.split(",") if h.strip())
+    mem_mask = pd.read_csv(args.membership_csv, index_col=0, parse_dates=True).astype(bool) if args.membership_csv else None
 
     panel = build_combined_panel(
         markets=markets,
@@ -579,6 +589,7 @@ def main() -> None:
         demo_stocks_per_market=args.demo_stocks_per_market,
         pit_fundamentals_csv=args.pit_fundamentals_csv,
         batch_size=args.batch_size,
+        membership_mask=mem_mask,
     )
     saved_path = save_dataframe(panel, args.output)
 

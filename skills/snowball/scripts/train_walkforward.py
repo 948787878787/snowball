@@ -2,10 +2,10 @@
 
 Designed to run seamlessly both on Kaggle (GPU/CPU) and locally with zero look-ahead bias:
 
-1. Strict Purge Gap:
+1. Strict Purge Gap (+1 Bar Next-Day-Open Settlement):
    For every refit date `t_refit`, training samples are strictly restricted to:
-       `date <= t_refit - timedelta(weeks=horizon)`
-   guaranteeing every training label (`fwd_ret_{horizon}w`) has completely settled before `t_refit`.
+       `date <= t_refit - timedelta(weeks=horizon + 1)`
+   guaranteeing every training label (`fwd_ret_{horizon}w`, exiting at next trading open) has completely settled before `t_refit`.
 
 2. 4-Model OOS Benchmark Comparison (identical OOS dates & universe):
    - `baseline_v6_prior`     : Zero-parameter theory prior (macro-conditioned price pillars)
@@ -52,6 +52,11 @@ from build_training_panel import (
     save_dataframe,
 )
 from macro_micro import BASELINE_V6_WEIGHTS, WEIGHT_BOUNDS
+from portfolio_sim import (
+    _apply_membership_mask,
+    append_trial_log,  # noqa: F401 (re-exported for callers & tests)
+    simulate_topk_twr as _simulate_topk_twr,
+)
 
 # Price-available pillars present in every historical panel row (before optional PIT fundamentals)
 PILLAR_PRIOR_WEIGHTS: Dict[str, float] = {
@@ -279,65 +284,6 @@ def _baseline_prior_score(df: pd.DataFrame) -> np.ndarray:
     )
 
 
-def _simulate_topk_twr(
-    oos_df: pd.DataFrame,
-    score_col: str,
-    top_k: int = 40,
-    rebalance_every: int = 4,
-    round_trip_cost: float = 0.0025,
-) -> Dict[str, float]:
-    """4-cohort staggered Top-K long-only weekly portfolio using Next-Day Open 1-week returns."""
-    if "fwd_ret_1w_open" not in oos_df.columns:
-        return {"TWR_CAGR": np.nan, "TWR_Sharpe": np.nan, "TWR_MDD": np.nan, "Avg_Weekly_Turnover": np.nan}
-
-    dates = sorted(oos_df["date"].dropna().unique())
-    if len(dates) < 8:
-        return {"TWR_CAGR": np.nan, "TWR_Sharpe": np.nan, "TWR_MDD": np.nan, "Avg_Weekly_Turnover": np.nan}
-
-    by_date = {dt: grp for dt, grp in oos_df.groupby("date")}
-    cohort_series: List[pd.Series] = []
-    turnover_list: List[float] = []
-
-    for offset in range(rebalance_every):
-        held: set = set()
-        wk_ret: Dict[pd.Timestamp, float] = {}
-        for i, dt in enumerate(dates):
-            grp = by_date[dt]
-            cost = 0.0
-            if i % rebalance_every == offset or not held:
-                ranked = grp.dropna(subset=[score_col]).sort_values(score_col, ascending=False)
-                k = min(top_k, max(4, len(ranked) // 10))
-                new_set = set(ranked["ticker"].iloc[:k].tolist())
-                if held:
-                    turn = len(new_set - held) / max(len(new_set), 1)
-                    cost = turn * round_trip_cost
-                    turnover_list.append(turn)
-                held = new_set
-
-            sub = grp.loc[grp["ticker"].isin(held), "fwd_ret_1w_open"].dropna()
-            gross = float(sub.mean()) if len(sub) > 0 else 0.0
-            wk_ret[dt] = gross - cost
-        cohort_series.append(pd.Series(wk_ret))
-
-    port_w = pd.concat(cohort_series, axis=1).mean(axis=1).dropna()
-    if len(port_w) < 4:
-        return {"TWR_CAGR": np.nan, "TWR_Sharpe": np.nan, "TWR_MDD": np.nan, "Avg_Weekly_Turnover": np.nan}
-
-    nav = (1.0 + port_w).cumprod()
-    n_w = len(port_w)
-    cagr = float(nav.iloc[-1] ** (52.0 / n_w) - 1.0)
-    mdd = float((nav / nav.cummax() - 1.0).min())
-    sd = float(port_w.std())
-    sharpe = float(port_w.mean() / sd * np.sqrt(52.0)) if sd > 1e-12 else np.nan
-    avg_turn = float(np.mean(turnover_list)) / rebalance_every if turnover_list else 0.0
-    return {
-        "TWR_CAGR": cagr,
-        "TWR_Sharpe": sharpe,
-        "TWR_MDD": mdd,
-        "Avg_Weekly_Turnover": avg_turn,
-    }
-
-
 def _evaluate_model_oos(
     oos_df: pd.DataFrame,
     score_col: str,
@@ -346,8 +292,9 @@ def _evaluate_model_oos(
     excess_col: str,
     horizon: int,
     top_k: int = 40,
+    tw_odd_lot: bool = False,
 ) -> Dict[str, float]:
-    """Compute comprehensive institutional OOS metrics (Global + US + TW + BSS + Net TWR)."""
+    """Compute comprehensive OOS metrics separately for Combined, US, and TW under real market costs."""
     ic_all = _compute_daily_ic_series(oos_df, score_col, target_col)
     ic_us = _compute_daily_ic_series(oos_df, score_col, target_col, market_filter="US")
     ic_tw = _compute_daily_ic_series(oos_df, score_col, target_col, market_filter="TW")
@@ -356,9 +303,10 @@ def _evaluate_model_oos(
     ic_std = float(ic_all.std()) if len(ic_all) > 1 else np.nan
     icir = float(ic_mean / ic_std) if (np.isfinite(ic_std) and ic_std > 1e-12) else np.nan
     t_nw = float(ev.newey_west_t(ic_all, lags=max(4, horizon))) if len(ic_all) >= 6 else np.nan
+    t_nw_us = float(ev.newey_west_t(ic_us, lags=max(4, horizon))) if len(ic_us) >= 6 else np.nan
+    t_nw_tw = float(ev.newey_west_t(ic_tw, lags=max(4, horizon))) if len(ic_tw) >= 6 else np.nan
     hit = float((ic_all > 0).mean()) if len(ic_all) else np.nan
 
-    # Brier Skill Score on binary outperformance event (fwd_excess > 0)
     valid_p = oos_df[[prob_col, excess_col]].dropna()
     if len(valid_p) >= 50:
         p = valid_p[prob_col].to_numpy(dtype=float)
@@ -368,7 +316,10 @@ def _evaluate_model_oos(
     else:
         brier_val, bss_val = np.nan, np.nan
 
-    twr = _simulate_topk_twr(oos_df, score_col, top_k=top_k, rebalance_every=max(1, min(horizon, 4)))
+    rebal_ev = max(1, min(horizon, 4))
+    twr_all = _simulate_topk_twr(oos_df, score_col, top_k=top_k, rebalance_every=rebal_ev, market="ALL", tw_odd_lot=tw_odd_lot)
+    twr_us = _simulate_topk_twr(oos_df, score_col, top_k=max(10, top_k // 2), rebalance_every=rebal_ev, market="US")
+    twr_tw = _simulate_topk_twr(oos_df, score_col, top_k=max(10, top_k // 2), rebalance_every=rebal_ev, market="TW", tw_odd_lot=tw_odd_lot)
 
     return {
         "OOS_Weeks": int(len(ic_all)),
@@ -377,10 +328,18 @@ def _evaluate_model_oos(
         "t_NW": t_nw,
         "IC_Hit_Rate": hit,
         "US_Rank_IC": float(ic_us.mean()) if len(ic_us) else np.nan,
+        "US_t_NW": t_nw_us,
+        "US_CAGR": twr_us["TWR_CAGR"],
+        "US_Sharpe": twr_us["TWR_Sharpe"],
+        "US_MDD": twr_us["TWR_MDD"],
         "TW_Rank_IC": float(ic_tw.mean()) if len(ic_tw) else np.nan,
+        "TW_t_NW": t_nw_tw,
+        "TW_CAGR": twr_tw["TWR_CAGR"],
+        "TW_Sharpe": twr_tw["TWR_Sharpe"],
+        "TW_MDD": twr_tw["TWR_MDD"],
         "Brier": brier_val,
         "BSS": bss_val,
-        **twr,
+        **twr_all,
     }
 
 
@@ -444,8 +403,17 @@ def run_purged_walkforward(
     use_gpu: bool = False,
     top_k: int = 40,
     seed: int = 42,
+    holdout_cutoff: Optional[str] = None,
+    membership_mask: Optional[pd.DataFrame] = None,
+    tw_odd_lot: bool = False,
 ) -> Dict[str, object]:
-    """Execute strict Purged Expanding Walk-Forward training across all 4 models."""
+    """Execute strict Purged Expanding Walk-Forward training across all 4 models.
+
+    Stage 1 guarantees:
+    - `holdout_cutoff` strictly freezes all dates > cutoff so the final 52-week holdout is untouched.
+    - Purge gap = `(horizon + 1)` weeks because Next-Day Open exit bar settles on Monday after `t + h`.
+    - Optional `membership_mask` filters out non-member `(date, ticker)` rows before training & OOS.
+    """
     target_col = f"target_rank_{horizon}w"
     excess_col = f"fwd_excess_{horizon}w"
     if target_col not in panel.columns:
@@ -453,16 +421,21 @@ def run_purged_walkforward(
 
     df = panel.copy()
     df["date"] = pd.to_datetime(df["date"])
+    if holdout_cutoff is not None:
+        df = df.loc[df["date"] <= pd.Timestamp(holdout_cutoff)].copy()
+    if membership_mask is not None:
+        df = _apply_membership_mask(df, membership_mask)
     df = df.sort_values(["date", "market", "ticker"]).reset_index(drop=True)
 
     feature_cols = detect_feature_columns(df)
     all_dates = np.sort(df["date"].unique())
-    if len(all_dates) <= min_train_weeks + horizon + 4:
+    purge_weeks = horizon + 1
+    if len(all_dates) <= min_train_weeks + purge_weeks + 4:
         raise ValueError(
-            f"Not enough weekly dates ({len(all_dates)}) for min_train_weeks={min_train_weeks} + horizon={horizon}."
+            f"Not enough weekly dates ({len(all_dates)}) for min_train_weeks={min_train_weeks} + purge={purge_weeks}."
         )
 
-    oos_start_idx = min_train_weeks + horizon
+    oos_start_idx = min_train_weeks + purge_weeks
     oos_dates = all_dates[oos_start_idx:]
 
     lgbm_active = enable_lgbm and _has_lightgbm()
@@ -481,8 +454,8 @@ def run_purged_walkforward(
     for block_start in range(0, len(oos_dates), refit_step_weeks):
         block_dates = oos_dates[block_start : block_start + refit_step_weeks]
         refit_date = pd.Timestamp(block_dates[0])
-        # STRICT PURGE GAP: training sample date + horizon weeks <= refit_date
-        max_settled_date = refit_date - pd.Timedelta(weeks=horizon)
+        # STRICT PURGE GAP (+1 bar for Next-Day Open exit settlement): date + (horizon + 1) weeks <= refit_date
+        max_settled_date = refit_date - pd.Timedelta(weeks=purge_weeks)
 
         train_mask = (df["date"] <= max_settled_date) & df[target_col].notna()
         test_mask = df["date"].isin(block_dates)
@@ -491,12 +464,12 @@ def run_purged_walkforward(
         if len(train_df) < 200 or test_df.empty:
             continue
 
-        # Assert strict zero-overlap purge guarantee
+        # Assert strict zero-overlap purge guarantee (+1 bar)
         actual_max_train = pd.Timestamp(train_df["date"].max())
         gap_days = (refit_date - actual_max_train).days
-        if gap_days < horizon * 7:
+        if gap_days < purge_weeks * 7:
             raise AssertionError(
-                f"Purge gap violation! max_train={actual_max_train.date()}, refit={refit_date.date()}, gap={gap_days}d < {horizon * 7}d"
+                f"Purge gap violation! max_train={actual_max_train.date()}, refit={refit_date.date()}, gap={gap_days}d < {purge_weeks * 7}d"
             )
         purge_audit.append({
             "refit_date": refit_date.date().isoformat(),
@@ -567,7 +540,7 @@ def run_purged_walkforward(
 
     oos_df = pd.concat(oos_frames, ignore_index=True)
 
-    # Evaluate every model on identical OOS panel
+    # Evaluate every model on identical OOS panel (real market costs + separate US / TW / Combined)
     metrics_by_model: Dict[str, Dict[str, float]] = {}
     for m_name in models_to_run:
         metrics_by_model[m_name] = _evaluate_model_oos(
@@ -578,12 +551,13 @@ def run_purged_walkforward(
             excess_col=excess_col,
             horizon=horizon,
             top_k=top_k,
+            tw_odd_lot=tw_odd_lot,
         )
 
-    # Fit final production LightGBM on all fully settled data (latest date - horizon)
+    # Fit final production LightGBM on all fully settled data (latest date - (horizon + 1))
     final_lgbm_model = last_lgbm_model
     if lgbm_active:
-        latest_settled = pd.Timestamp(all_dates[-1]) - pd.Timedelta(weeks=horizon)
+        latest_settled = pd.Timestamp(all_dates[-1]) - pd.Timedelta(weeks=purge_weeks)
         final_train = df.loc[(df["date"] <= latest_settled) & df[target_col].notna()]
         if len(final_train) >= 200:
             final_lgbm_model = _fit_lightgbm(
@@ -694,6 +668,9 @@ def main() -> None:
     parser.add_argument("--refit-step", type=int, default=8, help="Refit cadence in weeks (default: 8)")
     parser.add_argument("--ridge-alpha", type=float, default=500.0, help="Ridge L2 regularization strength (default: 500)")
     parser.add_argument("--top-k", type=int, default=40, help="Top-K portfolio size for OOS TWR simulation (default: 40)")
+    parser.add_argument("--holdout-cutoff", default=None, help="Freeze all dates > YYYY-MM-DD (e.g. 2025-11-20 for 52w holdout)")
+    parser.add_argument("--membership-csv", type=Path, default=None, help="Optional point-in-time constituent mask CSV")
+    parser.add_argument("--tw-odd-lot", action="store_true", help="Apply TW odd-lot slippage (1.185%% round-trip instead of 0.585%%)")
     parser.add_argument("--no-lgbm", action="store_true", help="Disable Stage 3 LightGBM even if installed")
     parser.add_argument("--gpu", action="store_true", help="Enable LightGBM GPU acceleration (Kaggle T4/P100)")
     parser.add_argument("--output-dir", type=Path, default=Path("snowball_artifacts"), help="Directory for exported artifacts")
@@ -714,6 +691,7 @@ def main() -> None:
     else:
         raise SystemExit("Provide --panel path/to/snowball_us_tw_2000.parquet or pass --offline-demo.")
 
+    mem_mask = pd.read_csv(args.membership_csv, index_col=0, parse_dates=True).astype(bool) if args.membership_csv else None
     res = run_purged_walkforward(
         panel=panel,
         horizon=args.horizon,
@@ -723,6 +701,9 @@ def main() -> None:
         enable_lgbm=not args.no_lgbm,
         use_gpu=args.gpu,
         top_k=args.top_k,
+        holdout_cutoff=args.holdout_cutoff,
+        membership_mask=mem_mask,
+        tw_odd_lot=args.tw_odd_lot,
     )
     exported = export_training_artifacts(res, args.output_dir)
 

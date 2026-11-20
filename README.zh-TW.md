@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. 執行離線單元測試（共 90 項測試）
+# 2. 執行離線單元測試（共 100 項測試）
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. 排序與回測全球任意股市（US / EU / JP / HK / TW / GLOBAL / 自訂代碼）
