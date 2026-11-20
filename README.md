@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. Run offline unit test suite (105 tests)
+# 2. Run offline unit test suite (110 tests)
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. Rank & backtest ANY global market (US / EU / JP / HK / TW / GLOBAL / custom tickers)

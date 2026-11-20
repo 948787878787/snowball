@@ -104,6 +104,10 @@ THEORY_SIGN_CONSTRAINTS: Dict[str, int] = {
     "pit_roe_z": +1,           # Profitability / ROE
     "pit_ep_z": +1,            # Earnings yield (Value)
     "pit_fcf_margin_z": +1,    # Free cash flow margin
+    "pit_tw_rev_3m_yoy_z": +1,     # Stage 4.1: Taiwan trailing 3m cumulative revenue YoY
+    "pit_tw_rev_accel_z": +1,      # Stage 4.1: Taiwan revenue YoY acceleration
+    "pit_tw_rev_12m_high_z": +1,   # Stage 4.1: Taiwan 12-month revenue breakout
+    "f_52w_high": +1,              # Stage 4.2: George & Hwang (2004) 52-week high proximity
 }
 
 
@@ -117,7 +121,8 @@ def _has_lightgbm() -> bool:
 
 def detect_feature_columns(panel: pd.DataFrame) -> List[str]:
     """Return cross-sectional ML feature columns (drops raw date-constant macro columns)."""
-    candidates = [c for c in CORE_FEATURE_COLS if c not in DROP_RAW_MACRO_COLS] + list(PIT_FUNDAMENTAL_COLS)
+    stage4_cols = ("pit_tw_rev_3m_yoy_z", "pit_tw_rev_accel_z", "pit_tw_rev_12m_high_z", "f_52w_high")
+    candidates = [c for c in CORE_FEATURE_COLS if c not in DROP_RAW_MACRO_COLS] + list(PIT_FUNDAMENTAL_COLS) + list(stage4_cols)
     return [c for c in candidates if c in panel.columns and panel[c].notna().any()]
 
 
