@@ -96,8 +96,13 @@ def _select_cohort_target(
     held: Optional[Set[str]] = None,
     max_industry_weight: Optional[float] = None,
     buffer_mult: float = 1.0,
+    min_adv_usd: Optional[float] = None,
 ) -> Set[str]:
     ranked = grp.dropna(subset=[score_col]).sort_values(score_col, ascending=False)
+    if min_adv_usd is not None and min_adv_usd > 0 and "adv_usd_20d" in ranked.columns:
+        is_liq = ranked["adv_usd_20d"].fillna(0.0) >= float(min_adv_usd)
+        keep_held = ranked["ticker"].isin(held) if held else False
+        ranked = ranked[is_liq | keep_held]
     if "is_limit_up" in ranked.columns:
         is_lu = ranked["is_limit_up"].fillna(False).astype(bool)
         keep_held = ranked["ticker"].isin(held) if held else False
@@ -159,13 +164,16 @@ def _run_single_cohort(
     offset: int, dates: List[pd.Timestamp], by_date: Dict[pd.Timestamp, pd.DataFrame], score_col: str,
     top_k: int, rebalance_every: int, mkt_map: Dict[str, str], last_valid_date: Dict[str, pd.Timestamp],
     market: str, tw_odd_lot: bool, round_trip_cost: Optional[float], weekly_us_tax: float, delist_return: float,
-    max_industry_weight: Optional[float] = None, buffer_mult: float = 1.0,
+    max_industry_weight: Optional[float] = None, buffer_mult: float = 1.0, min_adv_usd: Optional[float] = None,
 ) -> tuple[pd.Series, List[float]]:
     held, wk_ret, turnovers, final_date = set(), {}, [], dates[-1]
     for i, d in enumerate(dates):
         grp, cost = by_date[d], 0.0
         if i % rebalance_every == offset or not held:
-            new_set = _select_cohort_target(grp, score_col, top_k, held=held, max_industry_weight=max_industry_weight, buffer_mult=buffer_mult)
+            new_set = _select_cohort_target(
+                grp, score_col, top_k, held=held,
+                max_industry_weight=max_industry_weight, buffer_mult=buffer_mult, min_adv_usd=min_adv_usd,
+            )
             if held and "is_limit_down" in grp.columns:
                 new_set = new_set | (held & set(grp.loc[grp["is_limit_down"].fillna(False).astype(bool), "ticker"]))
             c_val, turn = _compute_rebalance_cost(new_set, held, mkt_map, market, tw_odd_lot, round_trip_cost)
@@ -188,14 +196,15 @@ def _run_single_cohort(
 
 
 def _apply_ex_ante_vol_target(
-    port_w: pd.Series, vol_target_annual: Optional[float], lookback_weeks: int = 12,
+    port_w: pd.Series, vol_target_annual: Optional[float], lookback_weeks: int = 12, cash_yield_annual: float = 0.0,
 ) -> tuple[pd.Series, float]:
-    """Scale weekly returns using strictly lagged (t-1) realized volatility (zero look-ahead)."""
+    """Scale weekly returns using strictly lagged (t-1) realized volatility, earning `cash_yield_annual` on idle cash."""
     if vol_target_annual is None or vol_target_annual <= 0:
         return port_w, 1.0
     trailing_vol = port_w.rolling(lookback_weeks, min_periods=4).std().shift(1) * np.sqrt(52.0)
     weights = (float(vol_target_annual) / trailing_vol.replace(0.0, np.nan)).clip(lower=0.0, upper=1.0).fillna(1.0)
-    return port_w * weights, float(weights.mean())
+    wk_cash = float(cash_yield_annual) / 52.0
+    return port_w * weights + (1.0 - weights) * wk_cash, float(weights.mean())
 
 
 def simulate_topk_twr(
@@ -204,8 +213,9 @@ def simulate_topk_twr(
     us_div_withhold_annual: float = DEFAULT_US_DIV_WITHHOLD_ANNUAL, delist_return: float = DEFAULT_DELIST_RETURN,
     max_industry_weight: Optional[float] = None, buffer_mult: float = 1.0,
     neutralize_scores: bool = False, vol_target_annual: Optional[float] = None,
+    cash_yield_annual: float = 0.0, min_adv_usd: Optional[float] = None,
 ) -> Dict[str, float]:
-    """4-cohort staggered Top-K long-only weekly portfolio with Stage 3 risk & turnover controls."""
+    """4-cohort staggered Top-K long-only weekly portfolio with Stage 3/v8 risk, liquidity & cash-yield controls."""
     keys = ("TWR_CAGR", "TWR_Sharpe", "TWR_MDD", "Avg_Weekly_Turnover", "Avg_Rebalance_Turnover", "Annual_Round_Trips", "Realized_Annual_Vol", "Avg_Exposure")
     empty = {k: np.nan for k in keys}
     if "fwd_ret_1w_open" not in oos_df.columns or oos_df.empty:
@@ -214,8 +224,7 @@ def simulate_topk_twr(
     settled = sub_df.dropna(subset=["fwd_ret_1w_open"])
     if settled.empty:
         return empty
-    last_settled_date = settled["date"].max()
-    sub_df = sub_df.loc[sub_df["date"] <= last_settled_date]
+    sub_df = sub_df.loc[sub_df["date"] <= settled["date"].max()]
     dates = sorted(sub_df["date"].dropna().unique())
     if len(dates) < 8:
         return empty
@@ -231,7 +240,7 @@ def simulate_topk_twr(
     for offset in range(rebalance_every):
         s_ret, turns = _run_single_cohort(
             offset, dates, by_date, eff_col, top_k, rebalance_every, mkt_map, last_valid_date,
-            market, tw_odd_lot, round_trip_cost, weekly_us_tax, delist_return, max_industry_weight, buffer_mult,
+            market, tw_odd_lot, round_trip_cost, weekly_us_tax, delist_return, max_industry_weight, buffer_mult, min_adv_usd,
         )
         cohort_series.append(s_ret)
         turnover_list.extend(turns)
@@ -239,7 +248,7 @@ def simulate_topk_twr(
     raw_w = pd.concat(cohort_series, axis=1).mean(axis=1).dropna()
     if len(raw_w) < 4:
         return empty
-    port_w, avg_exp = _apply_ex_ante_vol_target(raw_w, vol_target_annual)
+    port_w, avg_exp = _apply_ex_ante_vol_target(raw_w, vol_target_annual, cash_yield_annual=cash_yield_annual)
     nav, sd, rebal_turn = (1.0 + port_w).cumprod(), float(port_w.std()), (float(np.mean(turnover_list)) if turnover_list else 0.0)
     return {
         "TWR_CAGR": float(nav.iloc[-1] ** (52.0 / len(port_w)) - 1.0),
