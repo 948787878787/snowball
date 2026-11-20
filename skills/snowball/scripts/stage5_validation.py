@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+import evaluate as ev
 import portfolio_sim as psim
 import train_walkforward as twf
 
@@ -105,6 +106,55 @@ def compute_portfolio_weekly_returns(
     raw_w = pd.concat(cohorts, axis=1).mean(axis=1).dropna()
     port_w, _ = psim._apply_ex_ante_vol_target(raw_w, vol_target_annual)
     return port_w
+
+
+def compute_excess_metrics(
+    port_w: pd.Series,
+    bench_w: pd.Series,
+    *,
+    lags: int = 4,
+) -> Dict[str, float]:
+    """Compute net excess return over benchmark, Newey-West t-stat, Net IR, and Excess MDD."""
+    aligned = pd.concat([port_w.rename("port"), bench_w.rename("bench")], axis=1).dropna()
+    if len(aligned) < 4:
+        return {k: np.nan for k in ("Net_Excess_CAGR", "Net_Excess_Ann", "Excess_t_NW", "Net_IR", "Excess_MDD")}
+    p, b = aligned["port"], aligned["bench"]
+    ex = p - b
+    p_nav, b_nav = (1.0 + p).cumprod(), (1.0 + b).cumprod()
+    n_w = len(aligned)
+    p_cagr = float(p_nav.iloc[-1] ** (52.0 / n_w) - 1.0)
+    b_cagr = float(b_nav.iloc[-1] ** (52.0 / n_w) - 1.0)
+    p_mdd = float((p_nav / p_nav.cummax() - 1.0).min())
+    b_mdd = float((b_nav / b_nav.cummax() - 1.0).min())
+    sd_ex = float(ex.std())
+    if sd_ex <= 1e-12:
+        t_nw, ir = 0.0, 0.0
+    else:
+        t_nw = float(ev.newey_west_t(ex, lags=max(4, int(lags))))
+        ir = float(ex.mean() / sd_ex * np.sqrt(52.0))
+    return {
+        "Net_Excess_CAGR": p_cagr - b_cagr,
+        "Net_Excess_Ann": float(ex.mean() * 52.0),
+        "Excess_t_NW": t_nw,
+        "Net_IR": ir,
+        "Excess_MDD": p_mdd - b_mdd,
+    }
+
+
+def passes_v7_relative_gate(
+    excess_t_nw: float,
+    dsr_conservative: float,
+    *,
+    min_t_nw: float = 2.0,
+    min_dsr: float = 0.95,
+) -> bool:
+    """Strict v7 T5 pass gate: Net excess over TW EW t_NW >= 2.0 AND conservative DSR >= 0.95."""
+    return bool(
+        np.isfinite(excess_t_nw)
+        and np.isfinite(dsr_conservative)
+        and float(excess_t_nw) >= min_t_nw
+        and float(dsr_conservative) >= min_dsr
+    )
 
 
 def summarize_annual_regimes(port_w: pd.Series, ew_w: pd.Series) -> pd.DataFrame:

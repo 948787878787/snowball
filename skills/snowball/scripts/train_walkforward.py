@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -398,6 +399,27 @@ def map_learned_weights_to_v6(
     return {k: round(v / s_all, 4) for k, v in out.items()}
 
 
+def mask_unsettled_holdout_labels(panel: pd.DataFrame, holdout_cutoff: object) -> pd.DataFrame:
+    """Filter `date <= holdout_cutoff` and NaN-mask any forward label whose exit date exceeds `holdout_cutoff`.
+
+    Because Next-Day Open exit for an `h`-week label settles `(h + 1)` weeks after the signal date,
+    any row with `date > holdout_cutoff - (h + 1) weeks` leaks post-cutoff prices into its label.
+    """
+    cutoff = pd.Timestamp(holdout_cutoff)
+    out = panel.copy()
+    out["date"] = pd.to_datetime(out["date"])
+    out = out.loc[out["date"] <= cutoff].copy()
+
+    for col in out.columns:
+        if not (col.startswith("fwd_") or col.startswith("target_rank_")):
+            continue
+        m = re.search(r"(\d+)w", col)
+        h_weeks = int(m.group(1)) if m else 1
+        max_settled = cutoff - pd.Timedelta(weeks=h_weeks + 1)
+        out.loc[out["date"] > max_settled, col] = np.nan
+    return out
+
+
 def run_purged_walkforward(
     panel: pd.DataFrame,
     horizon: int = 4,
@@ -427,7 +449,7 @@ def run_purged_walkforward(
     df = panel.copy()
     df["date"] = pd.to_datetime(df["date"])
     if holdout_cutoff is not None:
-        df = df.loc[df["date"] <= pd.Timestamp(holdout_cutoff)].copy()
+        df = mask_unsettled_holdout_labels(df, holdout_cutoff)
     if membership_mask is not None:
         df = _apply_membership_mask(df, membership_mask)
     df = df.sort_values(["date", "market", "ticker"]).reset_index(drop=True)
