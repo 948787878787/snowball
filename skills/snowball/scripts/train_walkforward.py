@@ -636,7 +636,7 @@ def export_training_artifacts(result: Dict[str, object], output_dir: Path) -> Di
     # 4. OOS predictions panel
     pred_cols = [
         c for c in result["oos_predictions"].columns
-        if c in ("date", "ticker", "market", "industry", "fwd_ret_1w_open")
+        if c in ("date", "ticker", "market", "industry", "fwd_ret_1w_open", "f_vol_60d", "f_low_risk")
         or c.startswith(("pred_", "prob_", "target_rank_", "fwd_excess_"))
     ]
     pred_path = save_dataframe(result["oos_predictions"][pred_cols], output_dir / "oos_predictions.parquet")

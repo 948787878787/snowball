@@ -102,7 +102,7 @@ chmod +x install.sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. Run offline unit test suite (100 tests)
+# 2. Run offline unit test suite (105 tests)
 .venv/bin/pytest skills/snowball/scripts
 
 # 3. Rank & backtest ANY global market (US / EU / JP / HK / TW / GLOBAL / custom tickers)
@@ -116,7 +116,7 @@ python3 -m venv .venv
 .venv/bin/python skills/snowball/scripts/train_walkforward.py --panel ./kaggle_dataset/snowball_us_tw_2000_pit.parquet --output-dir ./snowball_artifacts
 # Apply Kaggle/Walk-Forward trained weights back to live ranking:
 .venv/bin/python skills/snowball/scripts/global_ranker.py --market GLOBAL --learned-weights ./snowball_artifacts/v6_learned_weights.json --top 20
-# Or upload notebooks/snowball_kaggle_train.ipynb directly to Kaggle (GPU/CPU) and click Save & Run All!
+# Or upload notebooks/snowball_notebook_b_model_lab.ipynb (v7 TW Model Lab) or notebooks/snowball_kaggle_train.ipynb to Kaggle!
 
 # 4. Run full Taiwan point-in-time backtest with FinMind monthly revenue & odd-lot simulator
 .venv/bin/python skills/snowball/scripts/backtest_v5.py
