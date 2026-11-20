@@ -211,6 +211,11 @@ def simulate_topk_twr(
     if "fwd_ret_1w_open" not in oos_df.columns or oos_df.empty:
         return empty
     sub_df = oos_df if market.upper() == "ALL" else oos_df.loc[oos_df["market"] == market.upper()]
+    settled = sub_df.dropna(subset=["fwd_ret_1w_open"])
+    if settled.empty:
+        return empty
+    last_settled_date = settled["date"].max()
+    sub_df = sub_df.loc[sub_df["date"] <= last_settled_date]
     dates = sorted(sub_df["date"].dropna().unique())
     if len(dates) < 8:
         return empty

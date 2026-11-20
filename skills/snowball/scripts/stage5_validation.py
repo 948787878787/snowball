@@ -82,6 +82,9 @@ def compute_portfolio_weekly_returns(
 ) -> pd.Series:
     """Return the exact net weekly return series of the 4-cohort staggered Stage 3 portfolio."""
     sub_df = oos_df if market.upper() == "ALL" else oos_df.loc[oos_df["market"] == market.upper()]
+    settled = sub_df.dropna(subset=["fwd_ret_1w_open"])
+    if not settled.empty:
+        sub_df = sub_df.loc[sub_df["date"] <= settled["date"].max()]
     dates = sorted(sub_df["date"].dropna().unique())
     eff_col = f"{score_col}_neut" if neutralize_scores else score_col
     if neutralize_scores:

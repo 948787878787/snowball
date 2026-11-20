@@ -350,3 +350,18 @@ def test_membership_mask_filters_in_build_combined_panel():
     assert dropped not in set(filtered["ticker"].unique())
     assert len(filtered) < len(base)
 
+
+def test_unsettled_panel_tail_does_not_trigger_fake_delisting():
+    """If ALL stocks have NaN fwd_ret_1w_open on trailing unsettled weeks, do NOT apply -30% delisting loss."""
+    dates = pd.date_range("2025-01-03", periods=14, freq="W-FRI")
+    rows = []
+    for i, d in enumerate(dates):
+        # Last 2 weeks are unsettled for the entire market (e.g., next-Monday open not yet occurred)
+        ret = np.nan if i >= 12 else 0.005
+        for j in range(10):
+            rows.append({"date": d, "ticker": f"T{j}.TW", "market": "TW", "pred_m": float(j), "fwd_ret_1w_open": ret})
+    res = twf._simulate_topk_twr(pd.DataFrame(rows), "pred_m", top_k=4, rebalance_every=4, market="TW", delist_return=-0.30)
+    assert res["TWR_MDD"] > -0.05, f"Unsettled panel tail triggered fake -30% delisting crash! MDD={res['TWR_MDD']}"
+    assert res["TWR_CAGR"] > 0.10
+
+
