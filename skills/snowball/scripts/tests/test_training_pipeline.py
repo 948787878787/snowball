@@ -229,3 +229,108 @@ def test_sec_xbrl_parser_and_pit_merge_handles_datetime_resolution():
     after_val = merged.loc[(merged["ticker"] == "AAPL") & (merged["date"] == pd.Timestamp("2024-05-03")), "pit_rule40_z"].iloc[0]
     assert pd.isna(before_val)
     assert np.isfinite(after_val)
+
+
+def test_p0_6_stale_pit_filings_expire_after_tolerance():
+    panel = pd.DataFrame({
+        "date": pd.to_datetime(["2024-05-10", "2024-05-10", "2024-05-10", "2024-05-10", "2025-03-07", "2025-03-07", "2025-03-07", "2025-03-07"]).astype("datetime64[ns]"),
+        "ticker": ["A", "B", "C", "D", "A", "B", "C", "D"],
+        "market": ["US"] * 8,
+        "industry": ["tech"] * 8,
+        "close_usd": [100.0] * 8,
+        "raw_close_usd": [100.0] * 8,
+    })
+    # Stock A only filed in May 2024 (stale >180d by March 2025); B,C,D filed fresh in Feb 2025
+    pit = pd.DataFrame([
+        {"ticker": "A", "available_date": "2024-05-01", "period_end": "2024-03-31", "rule40_pct": 60.0},
+        {"ticker": "B", "available_date": "2024-05-01", "period_end": "2024-03-31", "rule40_pct": 40.0},
+        {"ticker": "C", "available_date": "2024-05-01", "period_end": "2024-03-31", "rule40_pct": 30.0},
+        {"ticker": "D", "available_date": "2024-05-01", "period_end": "2024-03-31", "rule40_pct": 20.0},
+        {"ticker": "B", "available_date": "2025-02-15", "period_end": "2024-12-31", "rule40_pct": 42.0},
+        {"ticker": "C", "available_date": "2025-02-15", "period_end": "2024-12-31", "rule40_pct": 31.0},
+        {"ticker": "D", "available_date": "2025-02-15", "period_end": "2024-12-31", "rule40_pct": 21.0},
+    ])
+    merged = fpf.merge_pit_into_panel(panel, pit, max_staleness_days=180)
+    a_fresh = merged.loc[(merged["ticker"] == "A") & (merged["date"] == pd.Timestamp("2024-05-10")), "pit_rule40_z"].iloc[0]
+    a_stale = merged.loc[(merged["ticker"] == "A") & (merged["date"] == pd.Timestamp("2025-03-07")), "pit_rule40_z"].iloc[0]
+    assert np.isfinite(a_fresh)
+    assert pd.isna(a_stale), "Stale filing >180d must expire to NaN!"
+
+
+def test_p0_6_intra_ttm_split_normalizes_eps():
+    # 3 pre-split quarters ($5 EPS, 100M shares) + 1 post-10:1-split quarter ($0.50 EPS, 1,000M shares)
+    # True post-split TTM EPS = 0.5 + 0.5 + 0.5 + 0.5 = $2.00 (NOT 5+5+5+0.5 = $15.50!)
+    payload = {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {"form": "10-Q", "start": "2023-07-01", "end": "2023-09-30", "filed": "2023-11-01", "val": 1000.0},
+                            {"form": "10-Q", "start": "2023-10-01", "end": "2023-12-31", "filed": "2024-02-01", "val": 1000.0},
+                            {"form": "10-Q", "start": "2024-01-01", "end": "2024-03-31", "filed": "2024-05-01", "val": 1000.0},
+                            {"form": "10-Q", "start": "2024-04-01", "end": "2024-06-30", "filed": "2024-08-01", "val": 1000.0},
+                        ]
+                    }
+                },
+                "EarningsPerShareDiluted": {
+                    "units": {
+                        "USD/shares": [
+                            {"form": "10-Q", "start": "2023-07-01", "end": "2023-09-30", "filed": "2023-11-01", "val": 5.0},
+                            {"form": "10-Q", "start": "2023-10-01", "end": "2023-12-31", "filed": "2024-02-01", "val": 5.0},
+                            {"form": "10-Q", "start": "2024-01-01", "end": "2024-03-31", "filed": "2024-05-01", "val": 5.0},
+                            {"form": "10-Q", "start": "2024-04-01", "end": "2024-06-30", "filed": "2024-08-01", "val": 0.5},
+                        ]
+                    }
+                },
+                "WeightedAverageNumberOfDilutedSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {"form": "10-Q", "start": "2023-07-01", "end": "2023-09-30", "filed": "2023-11-01", "val": 1e8},
+                            {"form": "10-Q", "start": "2023-10-01", "end": "2023-12-31", "filed": "2024-02-01", "val": 1e8},
+                            {"form": "10-Q", "start": "2024-01-01", "end": "2024-03-31", "filed": "2024-05-01", "val": 1e8},
+                            {"form": "10-Q", "start": "2024-04-01", "end": "2024-06-30", "filed": "2024-08-01", "val": 1e9},
+                        ]
+                    }
+                },
+            }
+        }
+    }
+    out = fpf.parse_sec_company_facts("NVDA", payload, min_year=2023)
+    latest_eps = out.iloc[-1]["ttm_eps"]
+    assert abs(latest_eps - 2.0) < 1e-6, f"Expected split-normalized TTM EPS=2.0, got {latest_eps}"
+
+
+def test_p0_6_split_immune_ep_yield_guard_and_splits_df():
+    # NVDA pre-split in May 2024: nominal raw_close=$1000, unadjusted TTM EPS=$20 (true E/P=2%).
+    # After 10-for-1 split in June 2024, Yahoo auto_adjust close_usd in May 2024 is $100.
+    # Peer stocks have true E/P = 4%, 5%, 6% (higher than NVDA's 2%).
+    panel_adj_only = pd.DataFrame({
+        "date": pd.to_datetime(["2024-05-10"] * 4 + ["2024-07-12"]).astype("datetime64[ns]"),
+        "ticker": ["NVDA", "P1", "P2", "P3", "NVDA"],
+        "market": ["US"] * 5,
+        "industry": ["semi"] * 5,
+        "close_usd": [100.0, 100.0, 100.0, 100.0, 100.0],
+    })
+    pit = pd.DataFrame([
+        {"ticker": "NVDA", "available_date": "2024-05-01", "period_end": "2024-03-31", "ttm_eps": 20.0},
+        {"ticker": "P1", "available_date": "2024-05-01", "period_end": "2024-03-31", "ttm_eps": 4.0},
+        {"ticker": "P2", "available_date": "2024-05-01", "period_end": "2024-03-31", "ttm_eps": 5.0},
+        {"ticker": "P3", "available_date": "2024-05-01", "period_end": "2024-03-31", "ttm_eps": 6.0},
+    ])
+    # 1. Without raw_close_usd or splits_df, refuses to fabricate split-corrupted US ep_yield
+    m_safe = fpf.merge_pit_into_panel(panel_adj_only, pit)
+    assert "pit_ep_z" not in m_safe.columns or m_safe["pit_ep_z"].isna().all()
+
+    # 2. With splits_df (10-for-1 on 2024-06-10), NVDA true E/P = 2% < peers (4%,5%,6%) -> negative z-score!
+    splits = pd.DataFrame([{"ticker": "NVDA", "split_date": "2024-06-10", "split_ratio": 10.0}])
+    m_split = fpf.merge_pit_into_panel(panel_adj_only, pit, splits_df=splits)
+    nvda_z = m_split.loc[(m_split["ticker"] == "NVDA") & (m_split["date"] == pd.Timestamp("2024-05-10")), "pit_ep_z"].iloc[0]
+    assert nvda_z < 0.0, f"NVDA 2% E/P should rank BELOW 4-6% peers after split adjustment, got z={nvda_z}"
+
+    # 3. With nominal raw_close_usd ($1000 pre-split, $100 post-split), NVDA E/P is ALSO exact (negative z-score!)
+    panel_with_raw = panel_adj_only.copy()
+    panel_with_raw["raw_close_usd"] = [1000.0, 100.0, 100.0, 100.0, 100.0]
+    m_raw = fpf.merge_pit_into_panel(panel_with_raw, pit, splits_df=splits)
+    nvda_z_raw = m_raw.loc[(m_raw["ticker"] == "NVDA") & (m_raw["date"] == pd.Timestamp("2024-05-10")), "pit_ep_z"].iloc[0]
+    assert nvda_z_raw < 0.0, f"NVDA 2% E/P via raw_close_usd should be negative z-score, got {nvda_z_raw}"

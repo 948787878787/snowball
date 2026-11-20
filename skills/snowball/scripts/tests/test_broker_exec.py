@@ -54,6 +54,7 @@ def test_pre_trade_risk_guards_reject_oversized_overweight_and_killswitch(tmp_pa
         account_equity_usd=10000.0,
         current_positions_usd={"NVDA": 1200.0},  # 12% + 6% = 18% > 15% ceiling
         run_date="2026-11-20",
+        account_drawdown_pct=0.0,  # drawdown must be explicit; None fails closed
     )
     assert [o.ticker for o in approved] == ["AAPL"]
     reasons = {r["order"]["ticker"]: r["reason"] for r in rejected}
@@ -84,14 +85,16 @@ def test_idempotency_ledger_blocks_duplicate_submission_on_second_run(tmp_path: 
         def __init__(self):
             self.calls = 0
         def get_account_snapshot(self):
-            return {"broker": "alpaca", "equity_usd": 20000.0, "cash_usd": 2000.0, "positions_usd": {}}
+            return {"broker": "alpaca", "equity_usd": 20000.0, "cash_usd": 2000.0, "available_cash_usd": 2000.0, "positions_usd": {}}
+        def get_order_state(self, trade_date):
+            return {"pending_buy_usd": {}, "submitted_keys": set()}
         def submit_limit_order(self, order):
             self.calls += 1
             return {"id": f"ord_{self.calls}", "status": "accepted"}
 
     adapter = _FakePaperAdapter()
     limits = bx.RiskLimits()
-    cid = bx.make_client_order_id("2026-11-20", "alpaca", "BRK-B", "buy", 2.0)
+    cid = bx.make_client_order_id("2026-11-20", "alpaca", "BRK-B", "buy", market="US")
     plan = [bx.OrderIntent("BRK-B", "US", "buy", 2.0, 500.0, 502.5, "USD", 1005.0, "test", cid)]
     ledger_path = tmp_path / "ledger.json"
 
@@ -153,10 +156,12 @@ def test_shioaji_simulation_adapter_handles_odd_lot_and_whole_lot():
     class _MockShioaji:
         stock_account = "SIM_ACC"
         Contracts = SimpleNamespace(Stocks={"2330": "CONTRACT_2330", "2204": "CONTRACT_2204"})
-        def list_positions(self, acc):
-            return [SimpleNamespace(code="2330", quantity=1, last_price=1000.0)]
+        def list_positions(self, acc, unit=None):
+            return [SimpleNamespace(code="2330", quantity=1000, last_price=1000.0)]  # share units
         def account_balance(self):
             return SimpleNamespace(acc_balance=320000.0)
+        def settlements(self, acc):
+            return []
         def Order(self, **kwargs):
             return kwargs
         def place_order(self, contract, order):
@@ -166,16 +171,16 @@ def test_shioaji_simulation_adapter_handles_odd_lot_and_whole_lot():
     adapter = bx.ShioajiBrokerAdapter(mode="paper", api_client=_MockShioaji(), twd_per_usd=32.0)
     assert adapter.simulation is True
     snap = adapter.get_account_snapshot()
-    assert snap["positions_usd"]["2330.TW"] == pytest.approx(1000000.0 / 32.0)
+    assert snap["positions_usd"]["2330"] == pytest.approx(1000000.0 / 32.0)
 
     # Odd lot (300 shares -> IntradayOdd, qty=300)
-    o_odd = bx.OrderIntent("2204.TW", "TW", "buy", 300.0, 47.1, 47.3, "TWD", 443.4, "odd", "sb_odd", "IntradayOdd")
+    o_odd = bx.OrderIntent("2204.TW", "TW", "buy", 300.0, 47.1, 47.3, "TWD", 443.4, "odd", bx.make_client_order_id("2026-11-20", "shioaji", "2204.TW", "buy", market="TW"), "IntradayOdd")
     r_odd = adapter.submit_limit_order(o_odd)
     assert r_odd["order_lot"] == "IntradayOdd"
     assert r_odd["quantity"] == 300
 
     # Whole lot (2,000 shares -> Common, qty=2 lots)
-    o_lot = bx.OrderIntent("2204.TW", "TW", "buy", 2000.0, 47.1, 47.3, "TWD", 2956.2, "lot", "sb_lot", "Common")
+    o_lot = bx.OrderIntent("2204.TW", "TW", "buy", 2000.0, 47.1, 47.3, "TWD", 2956.2, "lot", bx.make_client_order_id("2026-11-21", "shioaji", "2204.TW", "buy", market="TW"), "Common")
     r_lot = adapter.submit_limit_order(o_lot)
     assert r_lot["order_lot"] == "Common"
     assert r_lot["quantity"] == 2

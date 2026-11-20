@@ -153,10 +153,16 @@ def _download_batched_ohlcv(
     period: str = "8y",
     batch_size: int = 150,
     pause_sec: float = 0.5,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Download adjusted Close, unadjusted Open (re-scaled by Close/RawClose factor), and Volume in batches."""
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Download adjusted Close, unadjusted nominal Raw Close, adjusted Open, and Volume in batches.
+
+    Using `auto_adjust=False` preserves unadjusted nominal `raw_close` for split-immune Point-in-Time
+    US `ttm_eps / raw_close` valuation ratios, while keeping total-return `Adj Close` and
+    `Open * (Adj Close / Close)` for momentum and Next-Day Open return labels.
+    """
     uniq = list(dict.fromkeys(tickers))
     close_parts: List[pd.DataFrame] = []
+    raw_close_parts: List[pd.DataFrame] = []
     open_parts: List[pd.DataFrame] = []
     vol_parts: List[pd.DataFrame] = []
 
@@ -166,18 +172,23 @@ def _download_batched_ohlcv(
         b_num = idx // batch_size + 1
         print(f"  [batch {b_num}/{n_batches}] downloading {len(chunk)} tickers ({period})...")
         try:
-            raw = yf.download(chunk, period=period, progress=False, auto_adjust=True, threads=True)
+            raw = yf.download(chunk, period=period, progress=False, auto_adjust=False, threads=True)
             if raw is None or raw.empty or "Close" not in raw:
                 continue
-            c = raw["Close"]
-            o = raw["Open"] if "Open" in raw else c.copy()
-            v = raw["Volume"] if "Volume" in raw else pd.DataFrame(np.nan, index=c.index, columns=c.columns)
-            if isinstance(c, pd.Series):
-                c = c.to_frame(name=chunk[0])
-                o = o.to_frame(name=chunk[0])
+            rc = raw["Close"]
+            ac = raw["Adj Close"] if "Adj Close" in raw else rc.copy()
+            ro = raw["Open"] if "Open" in raw else rc.copy()
+            v = raw["Volume"] if "Volume" in raw else pd.DataFrame(np.nan, index=rc.index, columns=rc.columns)
+            if isinstance(rc, pd.Series):
+                rc = rc.to_frame(name=chunk[0])
+                ac = ac.to_frame(name=chunk[0])
+                ro = ro.to_frame(name=chunk[0])
                 v = v.to_frame(name=chunk[0])
-            close_parts.append(c)
-            open_parts.append(o)
+            adj_factor = (ac / rc.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+            ao = ro * adj_factor
+            close_parts.append(ac)
+            raw_close_parts.append(rc)
+            open_parts.append(ao)
             vol_parts.append(v)
         except Exception as exc:
             print(f"  [WARN] batch {b_num} failed ({exc}); skipping chunk.")
@@ -188,13 +199,15 @@ def _download_batched_ohlcv(
         raise RuntimeError("No historical price data downloaded from Yahoo Finance.")
 
     close_d = pd.concat(close_parts, axis=1)
+    raw_close_d = pd.concat(raw_close_parts, axis=1)
     open_d = pd.concat(open_parts, axis=1)
     vol_d = pd.concat(vol_parts, axis=1)
     # Remove any duplicate columns safely
     close_d = close_d.loc[:, ~close_d.columns.duplicated()].dropna(how="all")
+    raw_close_d = raw_close_d.loc[:, ~raw_close_d.columns.duplicated()].reindex(index=close_d.index, columns=close_d.columns)
     open_d = open_d.loc[:, ~open_d.columns.duplicated()].reindex(index=close_d.index, columns=close_d.columns)
     vol_d = vol_d.loc[:, ~vol_d.columns.duplicated()].reindex(index=close_d.index, columns=close_d.columns)
-    return close_d, open_d, vol_d
+    return close_d, raw_close_d, open_d, vol_d
 
 
 def _make_synthetic_market_data(
@@ -278,12 +291,10 @@ def _make_synthetic_market_data(
     return close_d, open_d, vol_d, bench, trimmed_groups
 
 
-def _merge_pit_fundamentals(panel: pd.DataFrame, pit_csv: Path) -> pd.DataFrame:
+def _merge_pit_fundamentals(panel: pd.DataFrame, pit_csv: Path, max_staleness_days: int = 180) -> pd.DataFrame:
     """Strictly Point-in-Time backward merge of historical fundamentals by `available_date`.
 
-    Expected CSV columns: `ticker`, `available_date` (filing date + conservative lag),
-    and any subset of: `rule40_pct`, `rev_yoy`, `gross_margin_chg`, `roe`, `ep_yield`, `fcf_margin`.
-    Standardizes each metric cross-sectionally per `(date, market, industry)` after backward merge.
+    Enforces `tolerance=pd.Timedelta(days=max_staleness_days)` so stale filings expire cleanly.
     """
     pit = pd.read_csv(pit_csv)
     if "ticker" not in pit.columns or "available_date" not in pit.columns:
@@ -313,6 +324,7 @@ def _merge_pit_fundamentals(panel: pd.DataFrame, pit_csv: Path) -> pd.DataFrame:
         by="ticker",
         direction="backward",
         allow_exact_matches=True,
+        tolerance=pd.Timedelta(days=max_staleness_days),
     )
     # Assert zero look-ahead: available_date <= date everywhere it's non-null
     valid_ad = merged["available_date"].notna()
@@ -340,10 +352,16 @@ def _build_single_market_panel(
     groups: Dict[str, Tuple[str, ...]],
     macro_d: pd.DataFrame,
     horizons: Sequence[int] = (4, 12),
+    raw_close_d: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Compute strictly point-in-time weekly features and Next-Day Open labels for one market."""
     pf = compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
     close_w = pf["close_w"]
+    raw_close_w = (
+        raw_close_d.resample("W-FRI").last().reindex(index=close_w.index, columns=close_w.columns)
+        if raw_close_d is not None
+        else close_w
+    )
     next_open_w = pf["next_open_w"]
     weeks = close_w.index
     tickers = list(close_w.columns)
@@ -391,6 +409,7 @@ def _build_single_market_panel(
     gmap = {t: g for g, mems in groups.items() for t in mems}
     feature_panels = {
         "close_usd": close_w,
+        "raw_close_usd": raw_close_w,
         "next_open_usd": next_open_w,
         "f_mom_qual": pf["f_mom_qual"],
         "f_res_mom_vol": pf["f_res_mom_vol"],
@@ -467,11 +486,12 @@ def build_combined_panel(
                 seed=42 + idx_m * 17,
                 max_stocks=demo_stocks_per_market,
             )
+            raw_close_d = close_d.copy()
             if macro_d is None:
                 macro_d = make_offline_macro_data(close_d.index)
         else:
             print(f"\n=== Fetching {mkt} ({len(tickers)} stocks, benchmark={bench_sym}) ===")
-            close_d, open_d, vol_d = _download_batched_ohlcv(tickers, period=period, batch_size=batch_size)
+            close_d, raw_close_d, open_d, vol_d = _download_batched_ohlcv(tickers, period=period, batch_size=batch_size)
             b_raw = yf.download(bench_sym, period=period, progress=False, auto_adjust=True)
             if b_raw is None or b_raw.empty or "Close" not in b_raw:
                 raise RuntimeError(f"Failed to download benchmark {bench_sym} for {mkt}.")
@@ -484,6 +504,7 @@ def build_combined_panel(
             if MARKET_CONFIG[mkt].get("currency", "USD").upper() != "USD":
                 print(f"  Normalizing {mkt} prices & benchmark to USD via historical FX...")
                 close_d, open_d = convert_prices_to_usd(close_d, open_d, period=period)
+                raw_close_d, _ = convert_prices_to_usd(raw_close_d, raw_close_d.copy(), period=period)
                 b_df = bench_d.to_frame(name=bench_sym)
                 b_usd, _ = convert_prices_to_usd(b_df, b_df.copy(), period=period)
                 bench_d = b_usd[bench_sym]
@@ -501,6 +522,7 @@ def build_combined_panel(
             groups=groups,
             macro_d=macro_d,
             horizons=horizons,
+            raw_close_d=raw_close_d,
         )
         market_frames.append(frame)
 

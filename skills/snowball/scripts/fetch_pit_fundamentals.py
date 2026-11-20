@@ -72,6 +72,14 @@ CAPEX_TAGS = ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquirePr
 NI_TAGS = ("NetIncomeLoss", "ProfitLoss", "NetIncomeLossAvailableToCommonStockholdersBasic")
 EQ_TAGS = ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest")
 EPS_TAGS = ("EarningsPerShareDiluted", "EarningsPerShareBasic")
+DILUTED_SHARES_TAGS = (
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "WeightedAverageNumberOfSharesOutstandingBasic",
+    "CommonStockSharesOutstanding",
+)
+
+DEFAULT_MAX_STALENESS_DAYS = 180
+DEFAULT_MAX_PERIOD_AGE_DAYS = 270
 
 VALID_FORMS = frozenset({"10-Q", "10-K", "10-Q/A", "10-K/A", "20-F", "40-F"})
 
@@ -188,6 +196,9 @@ def parse_sec_company_facts(ticker: str, payload: dict, min_year: int = 2018) ->
     ni_df = _extract_xbrl_series(gaap, NI_TAGS, unit_key="USD", is_duration=True)
     eq_df = _extract_xbrl_series(gaap, EQ_TAGS, unit_key="USD", is_duration=False)
     eps_df = _extract_xbrl_series(gaap, EPS_TAGS, unit_key="USD/shares", is_duration=True)
+    sh_df = _extract_xbrl_series(gaap, DILUTED_SHARES_TAGS, unit_key="shares", is_duration=True)
+    if sh_df.empty:
+        sh_df = _extract_xbrl_series(gaap, DILUTED_SHARES_TAGS, unit_key="shares", is_duration=False)
 
     # Prefer quarterly rows for high-frequency PIT updates; supplement with annual rows
     def _latest_asof(src: pd.DataFrame, end_dt: pd.Timestamp, filed_dt: pd.Timestamp, annual: bool) -> float:
@@ -229,6 +240,39 @@ def parse_sec_company_facts(ticker: str, payload: dict, min_year: int = 2018) ->
         if len(q_sub) >= 4:
             last4 = q_sub.iloc[-4:]
             if (last4["end"].iloc[-1] - last4["end"].iloc[0]).days <= 320:
+                return float(last4["val"].sum())
+        a_sub = sub[sub["is_annual"]].sort_values("end")
+        if not a_sub.empty:
+            return float(a_sub["val"].iloc[-1])
+        return np.nan
+
+    def _ttm_eps_sum(src: pd.DataFrame, shares_src: pd.DataFrame, filed_dt: pd.Timestamp) -> float:
+        """Compute TTM EPS while normalizing intra-window stock splits using diluted share counts."""
+        if src.empty:
+            return np.nan
+        sub = src[src["filed"] <= filed_dt]
+        if sub.empty:
+            return np.nan
+        q_sub = sub[~sub["is_annual"]].sort_values("end").drop_duplicates("end", keep="last")
+        if len(q_sub) >= 4:
+            last4 = q_sub.iloc[-4:].copy()
+            if (last4["end"].iloc[-1] - last4["end"].iloc[0]).days <= 320:
+                if not shares_src.empty:
+                    sh_sub = shares_src[shares_src["filed"] <= filed_dt].sort_values("end").drop_duplicates("end", keep="last")
+                    sh_map = dict(zip(sh_sub["end"], sh_sub["val"]))
+                    latest_sh = sh_map.get(last4["end"].iloc[-1], np.nan)
+                    if np.isfinite(latest_sh) and latest_sh > 0:
+                        scaled = []
+                        for _, qrow in last4.iterrows():
+                            q_sh = sh_map.get(qrow["end"], np.nan)
+                            val = float(qrow["val"])
+                            if np.isfinite(q_sh) and q_sh > 0:
+                                ratio = latest_sh / q_sh
+                                # Detect mid-TTM stock split (>=1.75x) or reverse split (<=0.57x)
+                                if ratio >= 1.75 or ratio <= 0.57:
+                                    val = val / ratio
+                            scaled.append(val)
+                        return float(sum(scaled))
                 return float(last4["val"].sum())
         a_sub = sub[sub["is_annual"]].sort_values("end")
         if not a_sub.empty:
@@ -281,13 +325,14 @@ def parse_sec_company_facts(ticker: str, payload: dict, min_year: int = 2018) ->
         eq_now = _latest_balance(eq_df, filed_dt)
         roe = float(np.clip(ttm_ni / eq_now, -0.80, 1.20)) if (np.isfinite(ttm_ni) and np.isfinite(eq_now) and eq_now > 0) else np.nan
 
-        # TTM EPS (combined with point-in-time price during panel merge -> exact PIT E/P)
-        ttm_eps = _ttm_sum(eps_df, filed_dt)
+        # TTM EPS (intra-TTM split-normalized; combined with nominal raw_close_usd or splits_df -> split-immune E/P)
+        ttm_eps = _ttm_eps_sum(eps_df, sh_df, filed_dt)
 
         records.append({
             "ticker": ticker,
             "market": "US",
             "available_date": (filed_dt + pd.Timedelta(days=1)).date().isoformat(),
+            "period_end": end_dt.date().isoformat(),
             "rev_yoy": rev_yoy,
             "fcf_margin": fcf_margin,
             "rule40_pct": rule40_pct,
@@ -563,14 +608,59 @@ def fetch_tw_exchange_pit(
     return pd.concat(frames, ignore_index=True)
 
 
-def merge_pit_into_panel(panel: pd.DataFrame, pit_df: pd.DataFrame) -> pd.DataFrame:
+def _build_split_lookup(splits_df: Optional[pd.DataFrame]) -> Dict[str, List[Tuple[pd.Timestamp, float]]]:
+    """Index split events by ticker: {ticker: [(split_date, split_ratio), ...]}."""
+    lookup: Dict[str, List[Tuple[pd.Timestamp, float]]] = {}
+    if splits_df is None or splits_df.empty:
+        return lookup
+    for _, row in splits_df.iterrows():
+        sym = str(row["ticker"]).strip()
+        ratio = float(row["split_ratio"])
+        if not sym or not np.isfinite(ratio) or ratio <= 0 or abs(ratio - 1.0) < 1e-6:
+            continue
+        dt_val = pd.Timestamp(row["split_date"])
+        lookup.setdefault(sym, []).append((dt_val, ratio))
+    for sym in lookup:
+        lookup[sym].sort(key=lambda x: x[0])
+    return lookup
+
+
+def _cumulative_split_factor(
+    events: Sequence[Tuple[pd.Timestamp, float]],
+    start_exclusive: pd.Timestamp,
+    end_inclusive: pd.Timestamp,
+) -> float:
+    """Product of all split ratios occurring strictly in (start_exclusive, end_inclusive]."""
+    factor = 1.0
+    for s_dt, ratio in events:
+        if start_exclusive < s_dt <= end_inclusive:
+            factor *= ratio
+    return factor
+
+
+def merge_pit_into_panel(
+    panel: pd.DataFrame,
+    pit_df: pd.DataFrame,
+    *,
+    max_staleness_days: int = DEFAULT_MAX_STALENESS_DAYS,
+    max_period_age_days: int = DEFAULT_MAX_PERIOD_AGE_DAYS,
+    splits_df: Optional[pd.DataFrame] = None,
+    allow_adjusted_close_ep: bool = False,
+) -> pd.DataFrame:
     """Strictly Point-in-Time backward merge of PIT fundamentals into weekly price panel.
 
-    - Enforces `available_date <= date` via `pd.merge_asof(..., direction="backward")`.
-    - Computes exact PIT `ep_yield = ttm_eps / close_usd` for US rows where `ttm_eps` is present.
-    - Cross-sectionally z-scores each metric within `(date, market, industry)` (fallback `(date, market)`),
-      clipped to `[-3, +3]`, emitting `pit_rule40_z`, `pit_rev_yoy_z`, `pit_gross_margin_chg_z`,
-      `pit_roe_z`, `pit_ep_z`, `pit_fcf_margin_z`.
+    Anti-look-ahead & P0-6 protections:
+    - Enforces `available_date <= date` AND `tolerance=pd.Timedelta(days=max_staleness_days)`
+      so stale filings (>180d) expire cleanly to NaN instead of forward-filling indefinitely.
+    - When `period_end` is present, also expires filings whose fiscal period ended > `max_period_age_days`
+      before `date`.
+    - Split-immune US `ep_yield`:
+      1. If `raw_close_usd` (unadjusted nominal close) is in `panel`, divides `ttm_eps` (adjusted
+         for any split in `(period_end, date]` when `splits_df` is supplied) by `raw_close_usd`.
+      2. Else if `splits_df` is supplied, adjusts `ttm_eps` by cumulative splits in
+         `(period_end, panel_max_date]` so it matches Yahoo's split-adjusted `close_usd`.
+      3. Else refuses to silently compute split-corrupted `ttm_eps / adj_close` unless
+         `allow_adjusted_close_ep=True`.
     """
     if pit_df is None or pit_df.empty:
         return panel
@@ -581,8 +671,12 @@ def merge_pit_into_panel(panel: pd.DataFrame, pit_df: pd.DataFrame) -> pd.DataFr
 
     right = pit_df.copy()
     right["available_date"] = pd.to_datetime(right["available_date"]).astype("datetime64[ns]")
+    has_period_end = "period_end" in right.columns
+    if has_period_end:
+        right["period_end"] = pd.to_datetime(right["period_end"], errors="coerce").astype("datetime64[ns]")
     keep_raw = [c for c in ("rev_yoy", "fcf_margin", "rule40_pct", "gross_margin_chg", "roe", "ttm_eps", "ep_yield") if c in right.columns]
-    right = right[["ticker", "available_date", *keep_raw]].sort_values("available_date").reset_index(drop=True)
+    right_cols = ["ticker", "available_date", *(["period_end"] if has_period_end else []), *keep_raw]
+    right = right[right_cols].sort_values("available_date").reset_index(drop=True)
 
     merged = pd.merge_asof(
         left,
@@ -592,15 +686,65 @@ def merge_pit_into_panel(panel: pd.DataFrame, pit_df: pd.DataFrame) -> pd.DataFr
         by="ticker",
         direction="backward",
         allow_exact_matches=True,
+        tolerance=pd.Timedelta(days=max_staleness_days),
     )
     # Hard anti-look-ahead assertion
     valid_ad = merged["available_date"].notna()
     if valid_ad.any() and (merged.loc[valid_ad, "available_date"] > merged.loc[valid_ad, "date"]).any():
         raise AssertionError("Look-ahead violation in PIT fundamentals merge!")
 
-    # Compute exact Point-in-Time US E/P using TTM EPS / point-in-time close_usd
-    if "ttm_eps" in merged.columns and "close_usd" in merged.columns:
-        us_ep = (merged["ttm_eps"] / merged["close_usd"].replace(0.0, np.nan)).clip(lower=0.0, upper=0.25)
+    # Expire ancient fiscal periods (guards against late/amended filings of old periods)
+    if has_period_end:
+        stale_period = merged["period_end"].notna() & (
+            (merged["date"] - merged["period_end"]) > pd.Timedelta(days=max_period_age_days)
+        )
+        if stale_period.any():
+            for c in keep_raw:
+                merged.loc[stale_period, c] = np.nan
+
+    # Split-immune Point-in-Time US E/P calculation
+    if "ttm_eps" in merged.columns:
+        split_lookup = _build_split_lookup(splits_df)
+        has_raw_close = "raw_close_usd" in merged.columns and merged["raw_close_usd"].notna().any()
+        panel_end = pd.Timestamp(merged["date"].max())
+
+        if has_raw_close:
+            eps_adj = merged["ttm_eps"].astype(float).copy()
+            if split_lookup:
+                anchor = merged["period_end"] if has_period_end else merged["available_date"]
+                for sym, evs in split_lookup.items():
+                    m_sym = (merged["ticker"] == sym) & eps_adj.notna() & anchor.notna()
+                    if not m_sym.any():
+                        continue
+                    factors = [
+                        _cumulative_split_factor(evs, pd.Timestamp(a_dt), pd.Timestamp(d_dt))
+                        for a_dt, d_dt in zip(anchor.loc[m_sym], merged.loc[m_sym, "date"])
+                    ]
+                    eps_adj.loc[m_sym] = eps_adj.loc[m_sym].to_numpy() / np.asarray(factors, dtype=float)
+            us_ep = (eps_adj / merged["raw_close_usd"].replace(0.0, np.nan)).clip(lower=0.0, upper=0.25)
+        elif split_lookup and "close_usd" in merged.columns:
+            eps_adj = merged["ttm_eps"].astype(float).copy()
+            anchor = merged["period_end"] if has_period_end else merged["available_date"]
+            for sym, evs in split_lookup.items():
+                m_sym = (merged["ticker"] == sym) & eps_adj.notna() & anchor.notna()
+                if not m_sym.any():
+                    continue
+                factors = [
+                    _cumulative_split_factor(evs, pd.Timestamp(a_dt), panel_end)
+                    for a_dt in anchor.loc[m_sym]
+                ]
+                eps_adj.loc[m_sym] = eps_adj.loc[m_sym].to_numpy() / np.asarray(factors, dtype=float)
+            us_ep = (eps_adj / merged["close_usd"].replace(0.0, np.nan)).clip(lower=0.0, upper=0.25)
+        elif allow_adjusted_close_ep and "close_usd" in merged.columns:
+            print("[WARN] Computing US ep_yield against split-adjusted close_usd without raw_close_usd or splits_df.")
+            us_ep = (merged["ttm_eps"] / merged["close_usd"].replace(0.0, np.nan)).clip(lower=0.0, upper=0.25)
+        else:
+            print(
+                "[WARN] Skipping US ttm_eps -> ep_yield: panel lacks `raw_close_usd` and no `splits_df` provided "
+                "(prevents stock-split distortion). Rebuild panel with `build_training_panel.py` or pass `splits_df`."
+            )
+            us_ep = pd.Series(np.nan, index=merged.index, dtype=float)
+
         if "ep_yield" in merged.columns:
             merged["ep_yield"] = merged["ep_yield"].fillna(us_ep)
         else:
@@ -618,7 +762,6 @@ def merge_pit_into_panel(panel: pd.DataFrame, pit_df: pd.DataFrame) -> pd.DataFr
     for raw_c, z_c in raw_to_z.items():
         if raw_c not in merged.columns or merged[raw_c].isna().all():
             continue
-        # Within (date, market, industry) z-score with fallback to (date, market) when peer group < 4
         grp_ind = merged.groupby(["date", "market", "industry"])[raw_c]
         cnt_ind = grp_ind.transform("count")
         mu_ind = grp_ind.transform("mean")
@@ -632,7 +775,7 @@ def merge_pit_into_panel(panel: pd.DataFrame, pit_df: pd.DataFrame) -> pd.DataFr
 
         merged[z_c] = z_ind.where(cnt_ind >= 4, z_mkt).clip(-3.0, 3.0).astype(np.float32)
 
-    drop_cols = ["available_date", *keep_raw]
+    drop_cols = ["available_date", *(["period_end"] if has_period_end else []), *keep_raw]
     merged = merged.drop(columns=[c for c in drop_cols if c in merged.columns])
     return merged.sort_values(["date", "market", "ticker"]).reset_index(drop=True)
 
