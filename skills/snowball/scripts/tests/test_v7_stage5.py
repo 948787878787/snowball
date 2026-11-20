@@ -47,3 +47,31 @@ def test_regime_subperiod_attribution_splits_calendar_years():
     tbl = s5.summarize_annual_regimes(port_w, ew_w)
     assert set(tbl["year"].tolist()) == {2022, 2023, 2024}
     assert {"port_ret", "ew_ret", "excess_ret", "port_sharpe", "port_mdd"}.issubset(tbl.columns)
+
+
+def test_broker_exec_signals_csv_prefers_score_column_and_validates_close():
+    import pytest
+    import broker_exec as be
+
+    # Has `score` before `win_prob`: must sort by `score`, NOT `win_prob` (last column)!
+    df = pd.DataFrame([
+        {"ticker": "2330.TW", "close": 1000.0, "score": 2.0, "win_prob": 0.40},
+        {"ticker": "2412.TW", "close": 120.0, "score": 0.1, "win_prob": 0.99},
+    ])
+    orders = be.build_buy_only_plan(
+        df, market="TW", broker="shioaji", cash_native=100000.0,
+        account_equity_usd=50000.0, current_positions_usd={},
+        run_date="2026-11-20", limits=be.RiskLimits(), top_n=1,
+    )
+    assert len(orders) == 1
+    assert orders[0].ticker == "2330.TW", f"Expected top score 2330.TW, got {orders[0].ticker}"
+
+    # Missing `close` column must raise clean ValueError
+    df_no_close = pd.DataFrame([{"ticker": "2330.TW", "score": 2.0}])
+    with pytest.raises(ValueError, match="close"):
+        be.build_buy_only_plan(
+            df_no_close, market="TW", broker="shioaji", cash_native=100000.0,
+            account_equity_usd=50000.0, current_positions_usd={},
+            run_date="2026-11-20", limits=be.RiskLimits(), top_n=1,
+        )
+

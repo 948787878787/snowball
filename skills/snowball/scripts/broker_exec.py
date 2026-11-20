@@ -291,7 +291,9 @@ def build_buy_only_plan(
     mkt = market.upper()
     currency = "TWD" if mkt == "TW" else "USD"
     fx_to_usd = (1.0 / limits.twd_per_usd) if currency == "TWD" else 1.0
-    score_col = "v6_score" if "v6_score" in ranked_df.columns else ("v5_score" if "v5_score" in ranked_df.columns else ranked_df.columns[-1])
+    score_col = next((c for c in ("v6_score", "v5_score", "score") if c in ranked_df.columns), ranked_df.columns[-1])
+    if "close" not in ranked_df.columns:
+        raise ValueError("signals DataFrame is missing required 'close' column (native currency price).")
 
     df = ranked_df.dropna(subset=["ticker", "close", score_col]).copy()
     df = df[df["close"] > 0].sort_values(score_col, ascending=False).reset_index(drop=True)
