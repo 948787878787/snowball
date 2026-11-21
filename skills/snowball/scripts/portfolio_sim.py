@@ -182,11 +182,17 @@ def _run_single_cohort(
                 turnovers.append(turn)
             held = new_set
         ret_lookup = grp.set_index("ticker")["fwd_ret_1w_open"].to_dict()
+        settled_final = (
+            set(grp.loc[grp["delist_final"].fillna(False).astype(bool), "ticker"])
+            if "delist_final" in grp.columns else set()
+        )
         stk_rets, delisted_now = [], set()
         for sym in held:
             r_val = ret_lookup.get(sym, np.nan)
             if pd.notna(r_val) and np.isfinite(float(r_val)):
                 stk_rets.append(float(r_val) - (weekly_us_tax if mkt_map.get(sym, market.upper()) == "US" else 0.0))
+                if sym in settled_final:
+                    delisted_now.add(sym)  # T2: realised delisting exit, no extra unknown-delist penalty
             elif d < final_date and (last_valid_date.get(sym) is None or last_valid_date[sym] < d):
                 stk_rets.append(delist_return)
                 delisted_now.add(sym)

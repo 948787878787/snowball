@@ -30,6 +30,7 @@ import train_walkforward as twf
 import tw_monthly_rev as tmr
 
 HOLDOUT_CUTOFF = pd.Timestamp("2025-11-20")
+COMPONENT_SCORE_COLS = ("pred_baseline_v6_prior", "pred_stage1_icir_shrinkage", "r_blend", "l_blend", "pred_v7_final")
 STAGE3_LOCKED_CFG = dict(max_industry_weight=0.25, neutralize_scores=True, buffer_mult=10.0)
 
 
@@ -147,6 +148,8 @@ def main() -> None:
     parser.add_argument("--trial-log", type=Path, default=Path("results/trial_log.csv"), help="Path to trial_log.csv")
     parser.add_argument("--append-t1-correction", action="store_true", help="Append T1 correction row to trial_log.csv")
     parser.add_argument("--out-json", type=Path, default=None, help="Optional path to save JSON summary")
+    parser.add_argument("--save-oos", type=Path, default=None, help="Optional path to save trained OOS predictions parquet")
+    parser.add_argument("--all-models", action="store_true", help="T2: also score every component model on all periods")
     args = parser.parse_args()
 
     n_logged = len(pd.read_csv(args.trial_log)) if args.trial_log.exists() else 44
@@ -160,6 +163,19 @@ def main() -> None:
         full_oos = pd.read_parquet(args.oos_parquet)
     else:
         full_oos = None
+
+    if full_oos is not None and args.save_oos is not None:
+        full_oos.to_parquet(args.save_oos, index=False, compression="zstd")
+
+    if full_oos is not None and args.all_models:
+        per_model = {sc: evaluate_oos_periods(full_oos, score_col=sc, n_trials_cons=n_cons)
+                     for sc in COMPONENT_SCORE_COLS if sc in full_oos.columns}
+        if args.out_json is not None:
+            args.out_json.with_name(args.out_json.stem + "_all_models.json").write_text(
+                json.dumps({"n_trials_cons": n_cons, "models": per_model}, indent=2, default=str), encoding="utf-8")
+        for sc, periods_m in per_model.items():
+            print(f"\n=== {sc} (Conservative N={n_cons}) ===")
+            print(pd.DataFrame.from_dict(periods_m, orient="index").round(4).to_string())
 
     if full_oos is not None:
         periods = evaluate_oos_periods(full_oos, n_trials_cons=n_cons)
