@@ -94,3 +94,22 @@ def test_unsettled_tail_week_without_any_prices_is_not_a_delisting():
     res = cfs.simulate(df, "score", "px", _cfg())
     assert res.delist_events == 0
     assert res.final_positions.get("A", 0) > 0
+
+
+def test_held_name_leaving_universe_is_valued_from_fallback_not_written_down():
+    df = _panel({"A": [100.0, None, None], "B": 50.0}, {"A": [0.9, 0.9, 0.9], "B": [0.1, 0.1, 0.1]}, n=3)
+    dates = sorted(df["date"].unique())
+    wide = pd.DataFrame({"A": [100.0, 120.0, 130.0], "B": [50.0, 50.0, 50.0]}, index=pd.DatetimeIndex(dates))
+    res = cfs.simulate(df, "score", "px", _cfg(), price_fallback=wide)
+    assert res.delist_events == 0
+    assert res.final_positions.get("A", 0) > 0
+    a_sh = res.final_positions["A"]
+    assert res.values.iloc[-1] >= a_sh * 130.0
+
+
+def test_name_missing_from_both_panel_and_fallback_is_liquidated_at_last_price():
+    df = _panel({"A": [100.0, None, None], "B": 50.0}, {"A": [0.9, 0.9, 0.9], "B": [0.1, 0.1, 0.1]}, n=3)
+    dates = sorted(df["date"].unique())
+    wide = pd.DataFrame({"A": [100.0, float("nan"), float("nan")], "B": [50.0] * 3}, index=pd.DatetimeIndex(dates))
+    res = cfs.simulate(df, "score", "px", _cfg(), price_fallback=wide, delist_haircut=0.0)
+    assert res.delist_events == 1 and "A" not in res.final_positions

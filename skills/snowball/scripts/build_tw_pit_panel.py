@@ -71,6 +71,15 @@ def combine_price_sources(yahoo: pd.DataFrame, finmind: pd.DataFrame) -> pd.Data
     return out.sort_index()
 
 
+def next_open_wide(frame: pd.DataFrame) -> pd.DataFrame:
+    """Unmasked weekly execution prices (date x ticker), NaN after each delisted name's final week."""
+    wide = frame.pivot_table(index="date", columns="ticker", values="next_open_usd", aggfunc="last")
+    finals = frame.loc[frame["delist_final"].astype(bool), ["ticker", "date"]]
+    for tkr, last in zip(finals["ticker"], finals["date"]):
+        wide.loc[wide.index > last, tkr] = float("nan")
+    return wide
+
+
 def _start_date(period: str) -> str:
     years = _PERIOD_YEARS.get(period)
     if years is None:
@@ -113,7 +122,7 @@ def fetch_universe_prices(period: str, batch_size: int):
 
 
 def build_panel(period: str, top_n: int, batch_size: int, horizons: Sequence[int] = (4, 12)):
-    """Build the masked PIT panel; returns (panel, mask, mask_summary)."""
+    """Build the masked PIT panel; returns (panel, mask, mask_summary, unmasked next-open prices)."""
     meta, px, stale = fetch_universe_prices(period, batch_size)
     trading_days = px["close"].index
     weeks = pd.date_range(trading_days.min(), trading_days.max(), freq="W-FRI")
@@ -132,7 +141,7 @@ def build_panel(period: str, top_n: int, batch_size: int, horizons: Sequence[int
         raw_close_d=raw_usd, delisted_stale=stale,
     )
     panel = rerank_targets(psim._apply_membership_mask(frame, mask), horizons)
-    return panel.sort_values(["date", "ticker"]).reset_index(drop=True), mask, summary
+    return panel.sort_values(["date", "ticker"]).reset_index(drop=True), mask, summary, next_open_wide(frame)
 
 
 def augment_like_notebook_a(panel: pd.DataFrame, cache_dir: Path) -> pd.DataFrame:
@@ -167,8 +176,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    panel, mask, summary = build_panel(args.period, args.top_n, args.batch_size)
+    panel, mask, summary, wide = build_panel(args.period, args.top_n, args.batch_size)
     mask.to_parquet(args.out_dir / "tw_pit_membership_mask.parquet")
+    wide.to_parquet(args.out_dir / "tw_pit_next_open_usd_wide.parquet")
     summary.to_csv(args.out_dir / "tw_pit_mask_summary.csv")
     LOG.info("Mask summary by year:\n%s", summary.to_string())
     if args.augment:

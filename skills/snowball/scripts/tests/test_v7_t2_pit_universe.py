@@ -231,3 +231,19 @@ def test_etf_codes_starting_with_zero_are_not_common_stocks():
     assert list(tpu.select_common_stocks(info)["ticker"]) == ["1101.TW"]
     raw = pd.DataFrame({"date": ["2022-05-27", "2022-06-01"], "stock_id": ["0054", "2448"], "stock_name": ["a", "b"]})
     assert list(tpu.filter_delistings(raw, start="2019-01-01")["stock_id"]) == ["2448"]
+
+
+def test_next_open_wide_blanks_prices_after_delisting_final_week():
+    import build_tw_pit_panel as bpp
+
+    d = pd.date_range("2024-01-05", periods=4, freq="W-FRI")
+    frame = pd.DataFrame({
+        "date": list(d) * 2,
+        "ticker": ["X"] * 4 + ["Y"] * 4,
+        "next_open_usd": [1.0, 2.0, 2.0, 2.0, 5.0, 5.0, 5.0, 5.0],
+        "delist_final": [False, True, False, False] + [False] * 4,
+    })
+    wide = bpp.next_open_wide(frame)
+    assert wide["X"].tolist()[:2] == [1.0, 2.0]
+    assert wide["X"].iloc[2:].isna().all()
+    assert wide["Y"].notna().all()

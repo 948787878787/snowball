@@ -16,7 +16,7 @@ Outputs are TWD values; use `summarize` for money-weighted (XIRR) and time-weigh
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -129,9 +129,24 @@ def _buy_decisions(
     return spent
 
 
-def _handle_missing(book: _Book, today: pd.DataFrame, haircut: float, res: CashflowResult) -> float:
+def _fallback_px(fallback: Optional[pd.DataFrame], d: pd.Timestamp, t: str) -> float:
+    if fallback is None or t not in fallback.columns or d not in fallback.index:
+        return float("nan")
+    return float(fallback.at[d, t])
+
+
+def _handle_missing(
+    book: _Book, today: pd.DataFrame, haircut: float, res: CashflowResult,
+    fallback: Optional[pd.DataFrame], d: pd.Timestamp,
+) -> float:
+    """Held names absent from today's scored rows: keep them at the fallback price (e.g. they left the
+    PIT universe but still trade); liquidate at last price x (1 + haircut) only when no price exists."""
     cash_in = 0.0
     for t in [t for t in book.shares if t not in today.index]:
+        fb = _fallback_px(fallback, d, t)
+        if np.isfinite(fb) and fb > 0:
+            book.last_px = {**book.last_px, t: fb}
+            continue
         value = book.shares[t] * book.last_px.get(t, 0.0) * (1.0 + haircut)
         res.realized_pnl += value - book.cost[t]
         res.delist_events += 1
@@ -143,9 +158,13 @@ def _handle_missing(book: _Book, today: pd.DataFrame, haircut: float, res: Cashf
 
 def simulate(
     df: pd.DataFrame, score_col: str, price_col: str, cfg: CashflowConfig,
-    *, delist_haircut: float = DEFAULT_DELIST_HAIRCUT,
+    *, delist_haircut: float = DEFAULT_DELIST_HAIRCUT, price_fallback: Optional[pd.DataFrame] = None,
 ) -> CashflowResult:
-    """Run the weekly cash-flow simulation on a tidy (date, ticker, score, price) frame."""
+    """Run the weekly cash-flow simulation on a tidy (date, ticker, score, price) frame.
+
+    `price_fallback` (date x ticker, same units as `price_col`) values holdings that are missing from the
+    scored rows, e.g. names that left a point-in-time universe but still trade.
+    """
     data = df.dropna(subset=[score_col, price_col]).loc[lambda x: x[price_col] > 0].copy()
     data["_score"] = data[score_col].astype(float)
     data["_px"] = data[price_col].astype(float)
@@ -163,7 +182,7 @@ def simulate(
         contribs[d] = cfg.monthly_cash if month != prev_month else 0.0
         cash += contribs[d]
         prev_month = month
-        cash += _handle_missing(book, today, delist_haircut, res)
+        cash += _handle_missing(book, today, delist_haircut, res, price_fallback, d)
         book.last_px = {**book.last_px, **{t: float(today.at[t, "_px"]) for t in book.shares if t in today.index}}
         cash += _sell_decisions(book, today, cfg, d, res)
         cash -= _buy_decisions(book, today, cfg, cash, d, res)

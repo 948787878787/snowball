@@ -60,7 +60,10 @@ def ew_dca_benchmark(df: pd.DataFrame, fx: pd.Series, monthly_cash: float) -> tu
     return pd.Series(vals), pd.Series(contribs)
 
 
-def run(oos: pd.DataFrame, score: str, end: Optional[str], neutralize: bool = True) -> pd.DataFrame:
+def run(
+    oos: pd.DataFrame, score: str, end: Optional[str], neutralize: bool = True,
+    price_wide_usd: Optional[pd.DataFrame] = None, delist_haircut: float = cfs.DEFAULT_DELIST_HAIRCUT,
+) -> pd.DataFrame:
     df = oos.loc[oos["market"] == "TW"].copy()
     df["date"] = pd.to_datetime(df["date"]).astype("datetime64[ns]")
     if end is not None:
@@ -74,9 +77,16 @@ def run(oos: pd.DataFrame, score: str, end: Optional[str], neutralize: bool = Tr
         df = psim.neutralize_score_panel(df, score, out_col=f"{score}_neut")
         score_col = f"{score}_neut"
 
+    fallback = None
+    if price_wide_usd is not None:
+        wide = price_wide_usd.copy()
+        wide.index = pd.to_datetime(wide.index).astype("datetime64[ns]")
+        wide = wide.reindex(dates)
+        fallback = wide.mul(fx.reindex(dates), axis=0)
+
     rows: Dict[str, dict] = {}
     for name, cfg in VARIANTS.items():
-        res = cfs.simulate(df, score_col, "px_twd", cfg)
+        res = cfs.simulate(df, score_col, "px_twd", cfg, delist_haircut=delist_haircut, price_fallback=fallback)
         rows[name] = {**cfs.summarize(res.values, res.contributions), "Trades": res.n_trades,
                       "Blocked_Sells": res.blocked_sells, "Realized_PnL": res.realized_pnl,
                       "Fees": res.fees_paid, "Delist_Events": res.delist_events,
@@ -93,8 +103,13 @@ def main() -> None:
     parser.add_argument("--score", default="pred_v7_final")
     parser.add_argument("--end", default=None, help="Last signal date to include (e.g. 2025-11-20)")
     parser.add_argument("--out-csv", type=Path, default=None)
+    parser.add_argument("--price-wide", type=Path, default=None,
+                        help="PIT: unmasked weekly next-open USD prices (tw_pit_next_open_usd_wide.parquet)")
+    parser.add_argument("--delist-haircut", type=float, default=cfs.DEFAULT_DELIST_HAIRCUT,
+                        help="Use 0.0 for PIT panels, whose final prices already include the stale haircut")
     args = parser.parse_args()
-    tbl = run(pd.read_parquet(args.oos), args.score, args.end)
+    wide = pd.read_parquet(args.price_wide) if args.price_wide is not None else None
+    tbl = run(pd.read_parquet(args.oos), args.score, args.end, price_wide_usd=wide, delist_haircut=args.delist_haircut)
     pd.set_option("display.width", 220)
     print(tbl.round(4).to_string())
     if args.out_csv is not None:
