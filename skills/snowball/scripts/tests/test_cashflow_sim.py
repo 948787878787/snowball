@@ -113,3 +113,11 @@ def test_name_missing_from_both_panel_and_fallback_is_liquidated_at_last_price()
     wide = pd.DataFrame({"A": [100.0, float("nan"), float("nan")], "B": [50.0] * 3}, index=pd.DatetimeIndex(dates))
     res = cfs.simulate(df, "score", "px", _cfg(), price_fallback=wide, delist_haircut=0.0)
     assert res.delist_events == 1 and "A" not in res.final_positions
+
+
+def test_weekly_twr_strips_contributions():
+    idx = pd.date_range("2024-01-05", periods=3, freq="W-FRI")
+    values = pd.Series([100.0, 210.0, 231.0], index=idx)
+    contrib = pd.Series([100.0, 100.0, 0.0], index=idx)
+    twr = cfs.weekly_twr(values, contrib)
+    assert twr.tolist() == pytest.approx([0.10, 0.10])

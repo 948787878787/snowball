@@ -235,12 +235,17 @@ def xirr(flows: pd.Series) -> float:
     return 0.5 * (lo + hi)
 
 
+def weekly_twr(values: pd.Series, contributions: pd.Series) -> pd.Series:
+    """Weekly time-weighted returns with contribution flows removed: (V_t - C_t) / V_{t-1} - 1."""
+    twr = (values - contributions) / values.shift(1) - 1.0
+    return twr.iloc[1:].replace([np.inf, -np.inf], np.nan).dropna()
+
+
 def summarize(values: pd.Series, contributions: pd.Series) -> Dict[str, float]:
     """Money-weighted XIRR plus time-weighted CAGR / MDD that strip out the contribution flows."""
     flows = -contributions.copy()
     flows.iloc[-1] += values.iloc[-1]
-    prev = values.shift(1)
-    twr = ((values - contributions) / prev - 1.0).iloc[1:].replace([np.inf, -np.inf], np.nan).dropna()
+    twr = weekly_twr(values, contributions)
     curve = (1.0 + twr).cumprod()
     years = max((values.index[-1] - values.index[0]).days / 365.25, 1e-9)
     return {

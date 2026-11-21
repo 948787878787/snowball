@@ -22,6 +22,7 @@ import yfinance as yf
 
 import cashflow_sim as cfs
 import portfolio_sim as psim
+import stage5_validation as s5
 
 BASE = cfs.CashflowConfig()
 VARIANTS = {
@@ -84,16 +85,23 @@ def run(
         wide = wide.reindex(dates)
         fallback = wide.mul(fx.reindex(dates), axis=0)
 
+    etf = _next_day_value(_yahoo_series("0050.TW", start_s, end_s, "Adj Close"), dates)
+    etf_v, etf_c = cfs.dca_benchmark(etf, BASE.monthly_cash, BASE.fee_rate, BASE.min_fee)
+    ew_v, ew_c = ew_dca_benchmark(df, fx, BASE.monthly_cash)
+    bench_twr = {"EW": cfs.weekly_twr(ew_v, ew_c), "0050": cfs.weekly_twr(etf_v, etf_c)}
+
     rows: Dict[str, dict] = {}
     for name, cfg in VARIANTS.items():
         res = cfs.simulate(df, score_col, "px_twd", cfg, delist_haircut=delist_haircut, price_fallback=fallback)
-        rows[name] = {**cfs.summarize(res.values, res.contributions), "Trades": res.n_trades,
+        twr = cfs.weekly_twr(res.values, res.contributions)
+        sig = {f"t_NW_vs_{b}": s5.compute_excess_metrics(twr, bw, lags=4)["Excess_t_NW"] for b, bw in bench_twr.items()}
+        rows[name] = {**cfs.summarize(res.values, res.contributions), **sig, "Trades": res.n_trades,
                       "Blocked_Sells": res.blocked_sells, "Realized_PnL": res.realized_pnl,
                       "Fees": res.fees_paid, "Delist_Events": res.delist_events,
                       "Holdings_End": len(res.final_positions)}
-    etf = _next_day_value(_yahoo_series("0050.TW", start_s, end_s, "Adj Close"), dates)
-    rows["bench_0050_dca"] = cfs.summarize(*cfs.dca_benchmark(etf, BASE.monthly_cash, BASE.fee_rate, BASE.min_fee))
-    rows["bench_ew_universe_dca"] = cfs.summarize(*ew_dca_benchmark(df, fx, BASE.monthly_cash))
+    rows["bench_0050_dca"] = {**cfs.summarize(etf_v, etf_c),
+                              "t_NW_vs_EW": s5.compute_excess_metrics(bench_twr["0050"], bench_twr["EW"], lags=4)["Excess_t_NW"]}
+    rows["bench_ew_universe_dca"] = cfs.summarize(ew_v, ew_c)
     return pd.DataFrame.from_dict(rows, orient="index")
 
 
