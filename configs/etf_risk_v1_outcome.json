@@ -1,0 +1,9 @@
+{
+  "result": "FAILED",
+  "decided_on": "2026-11-22",
+  "code_commit": "1f956b028b6ace8012b3a4072664ebdb80fe55f6",
+  "A1_trend": "MDD -23.7% vs S0 -24.9% (needs 5pp); CAGR 9.9% vs 14.1%; fails all four conditions",
+  "A2_voltarget": "MDD -23.5%; CAGR 10.1%; fails three of four conditions",
+  "decision": "keep S0 (45/40/15, semiannual 5-point band); direction A closed; no forward observation",
+  "trials": "74-77 (ETF_RISK_V1), cumulative 77"
+}
