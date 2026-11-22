@@ -6,31 +6,32 @@ contract anniversary settlement.
 Usage (ledger OUTSIDE the git repo):
   python etf_monthly_report.py --init-ledger ../../../../core_etf_ledger/ledger.csv
   python etf_monthly_report.py --config ../../../configs/core_etf.json \
-      --ledger ../../../../core_etf_ledger/ledger.csv [--month 2026-12]
+      --ledger ../../../../core_etf_ledger/ledger.csv [--month 2026-12] [--refresh]
+  python etf_monthly_report.py --config ../../../configs/core_etf.json \
+      --ledger ../../../../core_etf_ledger/ledger.csv --check-entry      # weekly entry-point check
+Prices are cached once per day in <ledger dir>/.price_cache (use --refresh to re-download).
 """
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 import etf_config as ec
+import etf_entry_check as ck
 import etf_hurdle as eh
 import etf_ledger as el
 import etf_portfolio as ep
 import etf_rules as er
+from etf_ledger import net_invested
+from etf_price_cache import cached_series, yahoo_downloader
 
 
 def previous_month(today: pd.Timestamp) -> str:
     return (today.replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m")
-
-
-def net_invested(led: pd.DataFrame, as_of: pd.Timestamp) -> Dict[str, float]:
-    tr = led[(led["date"] <= as_of) & led["type"].isin(["buy", "sell"])]
-    return (-tr["cash_delta"]).groupby(tr["symbol"]).sum().to_dict()
 
 
 def _month_bounds(month: str):
@@ -40,9 +41,8 @@ def _month_bounds(month: str):
 
 def _suggestions(cfg, led, start, as_of, nav, weights, cash, prices, fx, bench) -> List[str]:
     nxt = as_of + pd.Timedelta(days=1)
-    px_twd = {s: float(prices[s].loc[:as_of].iloc[-1]) * (float(fx.loc[:as_of].iloc[-1]) if ec.is_usd(s) else 1.0)
-              for s in ec.risk_targets(cfg)}
-    tips = [f"{s['reason']}：買 {s['symbol'].split('.')[0]} 約 {s['amount_twd']:,.0f} 元（約 {s['shares']} 股）"
+    px_twd = ck.latest_price_twd(cfg, prices, fx, as_of)
+    tips = [f"{s['reason']}：買 {s['symbol'].split('.')[0]} 約 {s['amount_twd']:,.0f} 元（約 {er.format_shares(s['shares'])} 股）"
             for s in er.build_in(cfg, start, nxt, net_invested(led, as_of), px_twd)]
     reb = er.rebalance(cfg, start, nxt, weights, nav)
     tips += [f"半年再平衡：{'買' if t['amount_twd'] > 0 else '賣'} {t['symbol'].split('.')[0]} 約 {abs(t['amount_twd']):,.0f} 元（{t['reason']}）"
@@ -113,24 +113,30 @@ def render(d: Dict[str, Any], cfg: Dict[str, Any]) -> List[str]:
     ]
 
 
-def _fetch(cfg: Dict[str, Any], led: pd.DataFrame, month: str):
-    import yfinance as yf
+def _fetch(cfg: Dict[str, Any], led: Optional[pd.DataFrame], end: pd.Timestamp, cache_dir: Optional[Path] = None,
+           downloader=yahoo_downloader, refresh: bool = False):
+    held = set() if led is None else set(led.loc[led["type"].isin(["buy", "sell"]), "symbol"])
+    syms = sorted(set(ec.risk_targets(cfg)) | held)
+    first = pd.Timestamp.today() if led is None else led["date"].min()
+    start = (first - pd.Timedelta(days=1200)).strftime("%Y-%m-%d")
+    stop = (pd.Timestamp(end) + pd.Timedelta(days=3)).strftime("%Y-%m-%d")
 
-    syms = sorted(set(ec.risk_targets(cfg)) | set(led.loc[led["type"].isin(["buy", "sell"]), "symbol"]))
-    start = (led["date"].min() - pd.Timedelta(days=1200)).strftime("%Y-%m-%d")
-    end = (_month_bounds(month)[1] + pd.Timedelta(days=3)).strftime("%Y-%m-%d")
+    def get(sym: str, field: str) -> pd.Series:
+        return cached_series(sym, field, start, stop, cache_dir, downloader, refresh)
 
-    def series(sym: str, field: str) -> pd.Series:
-        raw = yf.download(sym, start=start, end=end, progress=False, auto_adjust=False)
-        if raw is None or raw.empty:
-            raise RuntimeError(f"No price data for {sym}")
-        s = raw[field]
-        return (s.iloc[:, 0] if isinstance(s, pd.DataFrame) else s).dropna()
-
-    prices = pd.DataFrame({s: series(s, "Close") for s in syms})
-    fx = series("TWD=X", "Close")
-    bench = series(cfg["benchmark"], "Adj Close")
+    prices = pd.DataFrame({s: get(s, "Close") for s in syms})
+    fx = get("TWD=X", "Close") if any(ec.is_usd(s) for s in syms) else pd.Series(dtype=float)
+    bench = get(cfg["benchmark"], "Adj Close")
     return prices, fx, bench
+
+
+def _load_ledger_or_none(path: Path) -> Optional[pd.DataFrame]:
+    try:
+        return el.load_ledger(path)
+    except ValueError as exc:
+        if "is empty" in str(exc):
+            return None
+        raise
 
 
 def main() -> None:
@@ -139,6 +145,8 @@ def main() -> None:
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--month", default=None, help="YYYY-MM; defaults to the previous calendar month")
     parser.add_argument("--init-ledger", type=Path, default=None, help="Create an empty ledger CSV and exit")
+    parser.add_argument("--check-entry", action="store_true", help="Weekly entry-point check (5-8 lines)")
+    parser.add_argument("--refresh", action="store_true", help="Ignore today's price cache and re-download")
     args = parser.parse_args()
     if args.init_ledger:
         el.init_ledger(args.init_ledger)
@@ -146,9 +154,15 @@ def main() -> None:
         return
     if not (args.config and args.ledger):
         parser.error("--config and --ledger are required")
-    cfg, led = ec.load_config(args.config), el.load_ledger(args.ledger)
+    cfg, cache = ec.load_config(args.config), args.ledger.parent / ".price_cache"
+    if args.check_entry:
+        led = _load_ledger_or_none(args.ledger)
+        prices, fx, bench = _fetch(cfg, led, pd.Timestamp.today(), cache, refresh=args.refresh)
+        print("\n".join(ck.entry_check(cfg, led, prices, fx, bench, prices.index.max())))
+        return
+    led = el.load_ledger(args.ledger)
     month = args.month or previous_month(pd.Timestamp.today())
-    prices, fx, bench = _fetch(cfg, led, month)
+    prices, fx, bench = _fetch(cfg, led, _month_bounds(month)[1], cache, refresh=args.refresh)
     print("\n".join(render(gather(cfg, led, prices, fx, bench, month), cfg)))
 
 

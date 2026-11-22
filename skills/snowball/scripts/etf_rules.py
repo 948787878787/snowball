@@ -9,15 +9,31 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import pandas as pd
 
-from etf_config import CASH, risk_targets
+from etf_config import CASH, is_usd, risk_targets
+
+USD_SHARE_DECIMALS = 3
 
 
 def months_between(start: pd.Timestamp, day: pd.Timestamp) -> int:
     return (day.year - start.year) * 12 + (day.month - start.month)
+
+
+def shares_for(symbol: str, amount_twd: float, price_twd: float) -> Union[int, float]:
+    """Whole odd-lot shares for TW listings; fractional shares (3 decimals) for USD ETFs bought via
+    sub-brokerage, so a tranche smaller than one share is not rounded down to zero."""
+    if price_twd <= 0:
+        return 0
+    if is_usd(symbol):
+        return round(amount_twd / price_twd, USD_SHARE_DECIMALS)
+    return int(amount_twd // price_twd)
+
+
+def format_shares(shares: Union[int, float]) -> str:
+    return str(shares) if isinstance(shares, int) else f"{shares:.{USD_SHARE_DECIMALS}f}"
 
 
 def build_in(cfg: Dict[str, Any], start: pd.Timestamp, as_of: pd.Timestamp, invested: Dict[str, float],
@@ -31,7 +47,7 @@ def build_in(cfg: Dict[str, Any], start: pd.Timestamp, as_of: pd.Timestamp, inve
     for sym, w in risk_targets(cfg).items():
         amount = max(0.0, capital * w * (k + 1) / months - invested.get(sym, 0.0))
         if amount > 0:
-            out.append({"symbol": sym, "amount_twd": amount, "shares": int(amount // price_twd[sym]),
+            out.append({"symbol": sym, "amount_twd": amount, "shares": shares_for(sym, amount, price_twd[sym]),
                         "reason": f"建倉第 {k + 1}/{months} 批"})
     return out
 
@@ -66,4 +82,4 @@ def drawdown_deploy(cfg: Dict[str, Any], index_close: pd.Series, cash: float, na
             "split": {sym: deploy * w / total for sym, w in risk.items()}}
 
 
-__all__ = ["months_between", "build_in", "rebalance", "drawdown_deploy"]
+__all__ = ["months_between", "shares_for", "format_shares", "build_in", "rebalance", "drawdown_deploy"]

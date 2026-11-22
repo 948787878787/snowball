@@ -76,3 +76,39 @@ def test_drawdown_tip_is_suppressed_while_build_in_is_running(tmp_path):
     assert not any("現金緩衝" in t for t in tips)
     after = mr.gather(CFG, led, prices, fx, crash, "2027-01")["tips"]
     assert not any("現金緩衝" in t for t in after)   # January report -> next month is still tranche 3
+
+
+def test_suggestions_survive_missing_last_price_for_one_market(tmp_path):
+    led = _ledger(tmp_path)
+    prices, fx, bench = _market()
+    prices.loc[prices.index[-1], "00646.TW"] = np.nan      # US-tracking ETF closed that day
+    tips = mr.gather(CFG, led, prices, fx, bench, "2027-01")["tips"]
+    assert isinstance(tips, list)
+
+
+class _FakeDownloader:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, sym, field, start, end):
+        self.calls.append(sym)
+        return pd.Series([1.0, 2.0], index=pd.to_datetime(["2026-11-19", "2026-11-20"]), name=sym)
+
+
+def test_fetch_skips_fx_for_all_twd_symbols_and_uses_daily_cache(tmp_path):
+    led = _ledger(tmp_path)
+    dl = _FakeDownloader()
+    prices, fx, bench = mr._fetch(CFG, led, pd.Timestamp("2026-11-21"), cache_dir=tmp_path / "cache", downloader=dl)
+    assert "TWD=X" not in dl.calls and fx.empty
+    n = len(dl.calls)
+    mr._fetch(CFG, led, pd.Timestamp("2026-11-21"), cache_dir=tmp_path / "cache", downloader=dl)
+    assert len(dl.calls) == n                               # second call served from cache
+    mr._fetch(CFG, led, pd.Timestamp("2026-11-21"), cache_dir=tmp_path / "cache", downloader=dl, refresh=True)
+    assert len(dl.calls) == 2 * n
+
+
+def test_fetch_downloads_fx_when_a_usd_symbol_is_held(tmp_path):
+    usd_cfg = {**CFG, "targets": {"006208.TW": 0.45, "VOO": 0.40, "CASH": 0.15}}
+    dl = _FakeDownloader()
+    mr._fetch(usd_cfg, _ledger(tmp_path), pd.Timestamp("2026-11-21"), cache_dir=tmp_path / "c2", downloader=dl)
+    assert "TWD=X" in dl.calls

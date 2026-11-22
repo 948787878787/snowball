@@ -92,10 +92,16 @@ def positions(led: pd.DataFrame, as_of) -> Dict[str, int]:
     return {s: int(round(v)) for s, v in held.items() if round(v) != 0}
 
 
+def net_invested(led: pd.DataFrame, as_of) -> Dict[str, float]:
+    """Net TWD put into each symbol (buy cash out minus sell cash in) up to `as_of`."""
+    tr = led[(led["date"] <= pd.Timestamp(as_of)) & led["type"].isin(["buy", "sell"])]
+    return (-tr["cash_delta"]).groupby(tr["symbol"]).sum().to_dict()
+
+
 def external_flows(led: pd.DataFrame) -> pd.Series:
     """Money entering (+) or leaving (-) the account by date; trading cash moves are internal."""
     ext = led[led["type"].isin(EXTERNAL_IN | EXTERNAL_OUT)]
     return ext.groupby("date")["cash_delta"].sum()
 
 
-__all__ = ["COLUMNS", "TYPES", "init_ledger", "load_ledger", "cash_balance", "positions", "external_flows"]
+__all__ = ["COLUMNS", "TYPES", "init_ledger", "load_ledger", "cash_balance", "positions", "net_invested", "external_flows"]
