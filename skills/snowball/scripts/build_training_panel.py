@@ -353,8 +353,13 @@ def _build_single_market_panel(
     macro_d: pd.DataFrame,
     horizons: Sequence[int] = (4, 12),
     raw_close_d: Optional[pd.DataFrame] = None,
+    delisted_stale: Optional[Dict[str, bool]] = None,
 ) -> pd.DataFrame:
-    """Compute strictly point-in-time weekly features and Next-Day Open labels for one market."""
+    """Compute strictly point-in-time weekly features and Next-Day Open labels for one market.
+
+    `delisted_stale` (T2): {ticker: is_stale} for delisted names; their forward returns are settled at the
+    final close (see `tw_pit_universe.apply_delisting_settlement`) and a `delist_final` flag is emitted.
+    """
     pf = compute_global_price_factors(close_d, bench_d, groups, open_d=open_d)
     close_w = pf["close_w"]
     raw_close_w = (
@@ -363,6 +368,12 @@ def _build_single_market_panel(
         else close_w
     )
     next_open_w = pf["next_open_w"]
+    delist_final = pd.DataFrame(False, index=close_w.index, columns=close_w.columns)
+    if delisted_stale:
+        from tw_pit_universe import apply_delisting_settlement
+        avail = vol_d if vol_d is not None else close_d
+        last_trade = {t: avail[t].last_valid_index() for t in delisted_stale if t in avail.columns}
+        next_open_w, delist_final = apply_delisting_settlement(next_open_w, close_w, delisted_stale, last_trade)
     weeks = close_w.index
     tickers = list(close_w.columns)
 
@@ -421,6 +432,7 @@ def _build_single_market_panel(
         "f_vol_60d": f_vol_60d,
         "f_liq": f_liq,
         "fwd_ret_1w_open": fwd_1w_open,
+        "delist_final": delist_final.astype(float),
         **fwd_cols,
     }
 
@@ -429,6 +441,7 @@ def _build_single_market_panel(
     out.index.names = ["date", "ticker"]
     out = out.reset_index()
 
+    out["delist_final"] = out["delist_final"].fillna(0.0).astype(bool)
     out["market"] = market
     out["is_tw"] = 1.0 if market == "TW" else 0.0
     out["industry"] = out["ticker"].map(lambda t: gmap.get(t, "other"))
