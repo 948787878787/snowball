@@ -1,0 +1,15 @@
+{
+  "version": "core-etf-1",
+  "note": "Core ETF allocation tracker for the 100,000 TWD account. Edit targets here; the tracker only suggests, it never places orders.",
+  "initial_capital_twd": 100000,
+  "targets": {"006208.TW": 0.45, "00646.TW": 0.40, "CASH": 0.15},
+  "alternatives": {"006208.TW": ["0050.TW"], "00646.TW": ["VOO", "VT"]},
+  "usd_symbols_need_fx": "symbols without a .TW / .TWO suffix are priced in USD and converted with TWD=X",
+  "build_in": {"months": 3},
+  "rebalance": {"every_months": 6, "band_abs": 0.05},
+  "drawdown_buffer": {"index": "0050.TW", "lookback_days": 756, "triggers": [-0.15, -0.20, -0.25]},
+  "benchmark": "0050.TW",
+  "contract": {"start_date": null, "hurdle_annual": 0.06, "cumulative_hurdle": false, "high_water_mark": true,
+               "manager_share_above_hurdle": 1.0, "leverage": false},
+  "costs": {"fee_rate": 0.001425, "min_fee_twd": 1.0, "etf_sell_tax": 0.001}
+}
