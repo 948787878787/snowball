@@ -14,10 +14,11 @@ Usage (log dir OUTSIDE the git repo):
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -75,14 +76,21 @@ def watchlist_report(snap: pd.DataFrame, stock_ids: Sequence[str], arm: str, sel
     return pd.DataFrame(rows)
 
 
+def load_outcome(config_path: Path) -> Dict[str, Any]:
+    """Recorded result of the pre-registered historical OOS (`v8_outcome.json` next to the config)."""
+    path = Path(config_path).parent / "v8_outcome.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
 def record_week(panel: pd.DataFrame, cfg: Dict[str, Any], model: Dict[str, Any], log_dir: Path,
-                commit: str, dry_run: bool) -> Dict[str, Any]:
+                commit: str, dry_run: bool, outcome: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if cfg.get("status") != "FROZEN" and not dry_run:
         raise PermissionError("Config is not FROZEN; only --dry-run is allowed before the protocol is approved")
     snap = score_snapshot(panel, cfg, model)
     signal_date = pd.Timestamp(snap["date"].iloc[0])
     rec = {
         "signal_date": str(signal_date.date()),
+        "status": (outcome or {}).get("paper_status", "PROTOCOL"),
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "config_version": cfg.get("version", ""),
         "config_sha256": vc.config_hash(cfg),
@@ -108,6 +116,7 @@ def record_week(panel: pd.DataFrame, cfg: Dict[str, Any], model: Dict[str, Any],
 
 def _print_summary(rec: Dict[str, Any], watch: Sequence[str], sell_pct: float) -> None:
     snap = rec["snapshot"]
+    print(f"STATUS: {rec['status']}")
     print(f"Signal date {rec['signal_date']}  config {rec['config_sha256'][:12]}  members {rec['n_members']}"
           f"  {'DRY RUN (not recorded)' if rec['dry_run'] else 'recorded'}")
     for arm in ARM_SCORES:
@@ -118,6 +127,8 @@ def _print_summary(rec: Dict[str, Any], watch: Sequence[str], sell_pct: float) -
         print(f"\n{arm} top {TOP_N_REPORT}:\n{top.to_string(index=False)}")
         if watch:
             print(f"{arm} watchlist:\n{watchlist_report(snap, watch, arm, sell_pct).to_string(index=False)}")
+    if rec["status"] != "PROTOCOL":
+        print(f"\n{rec['status']}: comparison record only; not a trading signal, no real money.")
     print("\nModel signals only. No orders are placed; buy/sell decisions are the user's.")
 
 
@@ -132,7 +143,8 @@ def main() -> None:
     args = parser.parse_args()
     cfg = vc.load_config(args.config)
     panel = pd.read_parquet(args.panel)
-    rec = record_week(panel, cfg, vm.load_model(args.model), args.log_dir, _git_commit(), args.dry_run)
+    rec = record_week(panel, cfg, vm.load_model(args.model), args.log_dir, _git_commit(), args.dry_run,
+                      outcome=load_outcome(args.config))
     sell_pct = float(cfg.get("portfolios", {}).get("user_rules", {}).get("sell_pct", 0.60))
     _print_summary(rec, [s for s in args.watch.split(",") if s], sell_pct)
 

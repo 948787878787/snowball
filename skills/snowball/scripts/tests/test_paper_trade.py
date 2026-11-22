@@ -96,3 +96,17 @@ def test_snapshot_demeans_within_configured_industry_column():
     assert "industry_twse" in snap.columns
     means = snap.groupby("industry_twse")["P1_v8_blend_score"].mean()
     assert np.allclose(means, 0.0)
+
+
+def test_failed_oos_outcome_forces_observation_only_status(tmp_path: Path):
+    panel = _panel()
+    outcome = {"historical_oos": "FAILED", "paper_status": "FAILED_OOS_OBSERVATION_ONLY"}
+    rec = pt.record_week(panel, CFG, _model(panel), tmp_path, commit="abc", dry_run=False, outcome=outcome)
+    assert rec["status"] == "FAILED_OOS_OBSERVATION_ONLY"
+    assert pd.read_csv(tmp_path / "manifest.csv").iloc[0]["status"] == "FAILED_OOS_OBSERVATION_ONLY"
+
+
+def test_default_outcome_file_is_read_next_to_config(tmp_path: Path):
+    (tmp_path / "v8_outcome.json").write_text('{"historical_oos": "FAILED", "paper_status": "FAILED_OOS_OBSERVATION_ONLY"}')
+    assert pt.load_outcome(tmp_path / "v8_frozen.json")["paper_status"] == "FAILED_OOS_OBSERVATION_ONLY"
+    assert pt.load_outcome(tmp_path / "missing" / "v8_frozen.json") == {}

@@ -1,0 +1,9 @@
+{
+  "historical_oos": "FAILED",
+  "decided_on": "2026-11-22",
+  "config_sha256": "ed8a2bb0c43669e73cb8d97758741a649d45e8cf7917b7206beb92f9d1670719",
+  "code_commit": "1778f5fd35ec51434ba26951a566c617c9ba9765",
+  "gate": "P1 excess t_NW vs TW EW 0.81 < 2.0; DSR 0.068 < 0.95 (N = 93)",
+  "decision": "active stock-selection research stopped; no real money; core ETF allocation instead",
+  "paper_status": "FAILED_OOS_OBSERVATION_ONLY"
+}
