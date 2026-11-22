@@ -9,6 +9,9 @@ next trading day's open, supplied as the price column):
   cost basis (zero-realized-loss rule). `allow_loss_sells=True` lifts the rule for comparison.
   Sells pay fee + `sell_tax` (0.3% TW securities transaction tax).
 - A held name with no price (delisted) is written down by `delist_haircut` and removed.
+- v8 lump-sum variant: `initial_cash` credited on the first week, `buy_amount` caps each buy,
+  `max_names` caps the number of distinct holdings, `industry_cap` caps one industry's share of equity
+  (needs `industry_col`), and `slippage` moves odd-lot fills against the trader on both sides.
 
 Outputs are TWD values; use `summarize` for money-weighted (XIRR) and time-weighted metrics.
 """
@@ -35,6 +38,11 @@ class CashflowConfig:
     sell_tax: float = 0.003
     max_weight: float = 0.20
     allow_loss_sells: bool = False
+    initial_cash: float = 0.0
+    buy_amount: Optional[float] = None
+    max_names: Optional[int] = None
+    industry_cap: Optional[float] = None
+    slippage: float = 0.0
 
 
 @dataclass
@@ -82,7 +90,7 @@ def _sell_decisions(
             continue
         if today.at[t, "_pct"] >= cfg.sell_pct:
             continue
-        px, sh = float(today.at[t, "_px"]), book.shares[t]
+        px, sh = float(today.at[t, "_px"]) * (1.0 - cfg.slippage), book.shares[t]
         gross = sh * px
         net = gross - _fee(gross, cfg) - cfg.sell_tax * gross
         if net <= book.cost[t] and not cfg.allow_loss_sells:
@@ -98,30 +106,53 @@ def _sell_decisions(
     return cash_in
 
 
+def _industry_value(book: _Book, ind_of: Dict[str, str], industry: str) -> float:
+    return sum(sh * book.last_px.get(t, 0.0) for t, sh in book.shares.items() if ind_of.get(t) == industry)
+
+
+def _eligible(book: _Book, t: str, row: pd.Series, cfg: CashflowConfig, equity: float, budget: float,
+              ind_of: Dict[str, str]) -> bool:
+    px = float(row["_px"]) * (1.0 + cfg.slippage)
+    held_val = book.shares.get(t, 0) * float(row["_px"])
+    room = cfg.max_weight * equity - held_val if equity > 0 else budget
+    if room < px * (1.0 + cfg.fee_rate):
+        return False
+    if cfg.max_names is not None and t not in book.shares and len(book.shares) >= cfg.max_names:
+        return False
+    if cfg.industry_cap is not None and equity > 0 and "_ind" in row.index:
+        ind = str(row["_ind"])
+        if (_industry_value(book, ind_of, ind) + min(budget, room)) / equity > cfg.industry_cap + 1e-12:
+            return False
+    return True
+
+
 def _buy_decisions(
     book: _Book, today: pd.DataFrame, cfg: CashflowConfig, cash: float, d: pd.Timestamp, res: CashflowResult,
+    ind_of: Optional[Dict[str, str]] = None,
 ) -> float:
+    ind_of = ind_of or {}
     equity = cash + sum(book.shares[t] * book.last_px.get(t, 0.0) for t in book.shares)
+    total_budget = min(cash, cfg.buy_amount * cfg.n_buy) if cfg.buy_amount is not None else cash
+    per_pick = total_budget / max(cfg.n_buy, 1)
     cands = today.loc[today["_pct"] >= cfg.buy_pct].sort_values("_score", ascending=False)
     picks = []
     for t, row in cands.iterrows():
-        held_val = book.shares.get(t, 0) * float(row["_px"])
-        if equity > 0 and held_val / equity >= cfg.max_weight:
+        if not _eligible(book, t, row, cfg, equity, per_pick, ind_of):
             continue
         picks.append(t)
         if len(picks) >= cfg.n_buy:
             break
     spent = 0.0
     for t in picks:
-        budget = (cash - spent) / (len(picks) - picks.index(t))
-        px = float(today.at[t, "_px"])
-        cap = max(0.0, cfg.max_weight * equity - book.shares.get(t, 0) * px) if equity > 0 else budget
+        budget = (total_budget - spent) / (len(picks) - picks.index(t))
+        px = float(today.at[t, "_px"]) * (1.0 + cfg.slippage)
+        cap = max(0.0, cfg.max_weight * equity - book.shares.get(t, 0) * float(today.at[t, "_px"])) if equity > 0 else budget
         sh = _affordable_shares(min(budget, cap) if cap > 0 else budget, px, cfg)
         if sh <= 0:
             continue
         outlay = sh * px + _fee(sh * px, cfg)
         spent += outlay
-        res.fees_paid += outlay - sh * px
+        res.fees_paid += outlay - sh * float(today.at[t, "_px"])
         res.n_trades += 1
         res.trade_log.append({"date": d, "ticker": t, "side": "buy", "shares": sh, "px": px, "pnl": 0.0})
         book.shares = {**book.shares, t: book.shares.get(t, 0) + sh}
@@ -159,6 +190,7 @@ def _handle_missing(
 def simulate(
     df: pd.DataFrame, score_col: str, price_col: str, cfg: CashflowConfig,
     *, delist_haircut: float = DEFAULT_DELIST_HAIRCUT, price_fallback: Optional[pd.DataFrame] = None,
+    industry_col: Optional[str] = None,
 ) -> CashflowResult:
     """Run the weekly cash-flow simulation on a tidy (date, ticker, score, price) frame.
 
@@ -169,6 +201,10 @@ def simulate(
     data["_score"] = data[score_col].astype(float)
     data["_px"] = data[price_col].astype(float)
     data["_pct"] = data.groupby("date")["_score"].rank(pct=True)
+    ind_of: Dict[str, str] = {}
+    if industry_col is not None:
+        data["_ind"] = data[industry_col].astype(str)
+        ind_of = data.groupby("ticker")["_ind"].last().to_dict()
     by_date = {d: g.set_index("ticker") for d, g in data.groupby("date")}
     dates = sorted(pd.to_datetime(data["date"].unique()))  # skip unsettled weeks with no prices at all
 
@@ -179,13 +215,13 @@ def simulate(
     for d in dates:
         today = by_date.get(d, pd.DataFrame(columns=["_score", "_px", "_pct"]))
         month = (d.year, d.month)
-        contribs[d] = cfg.monthly_cash if month != prev_month else 0.0
+        contribs[d] = (cfg.monthly_cash if month != prev_month else 0.0) + (cfg.initial_cash if d == dates[0] else 0.0)
         cash += contribs[d]
         prev_month = month
         cash += _handle_missing(book, today, delist_haircut, res, price_fallback, d)
         book.last_px = {**book.last_px, **{t: float(today.at[t, "_px"]) for t in book.shares if t in today.index}}
         cash += _sell_decisions(book, today, cfg, d, res)
-        cash -= _buy_decisions(book, today, cfg, cash, d, res)
+        cash -= _buy_decisions(book, today, cfg, cash, d, res, ind_of)
         book.last_px = {**book.last_px, **today["_px"].astype(float).to_dict()}
         cashes[d] = cash
         vals[d] = cash + sum(sh * book.last_px.get(t, 0.0) for t, sh in book.shares.items())
@@ -212,6 +248,21 @@ def dca_benchmark(
             shares += sh
         vals[d] = cash + shares * float(p)
     return pd.Series(vals), pd.Series(contribs)
+
+
+def lump_benchmark(
+    px: pd.Series, initial_cash: float, fee_rate: float = 0.001425, min_fee: float = 1.0,
+) -> Tuple[pd.Series, pd.Series]:
+    """Buy-and-hold one instrument (e.g. 0050) with a single lump sum on the first date."""
+    cfg = CashflowConfig(monthly_cash=0.0, fee_rate=fee_rate, min_fee=min_fee)
+    series = px.dropna()
+    first = float(series.iloc[0])
+    shares = _affordable_shares(initial_cash, first, cfg)
+    cash = initial_cash - shares * first - _fee(shares * first, cfg)
+    vals = cash + shares * series.astype(float)
+    contribs = pd.Series(0.0, index=series.index)
+    contribs.iloc[0] = initial_cash
+    return vals, contribs
 
 
 def xirr(flows: pd.Series) -> float:

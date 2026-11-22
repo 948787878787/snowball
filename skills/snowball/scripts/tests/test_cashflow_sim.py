@@ -121,3 +121,59 @@ def test_weekly_twr_strips_contributions():
     contrib = pd.Series([100.0, 100.0, 0.0], index=idx)
     twr = cfs.weekly_twr(values, contrib)
     assert twr.tolist() == pytest.approx([0.10, 0.10])
+
+
+# --- v8 lump-sum user rules: initial capital, per-buy amount, name / industry caps, odd-lot slippage ---
+
+
+def _lump_cfg(**kw) -> cfs.CashflowConfig:
+    return _cfg(monthly_cash=0.0, initial_cash=100_000.0, buy_amount=10_000.0, buy_pct=0.0, **kw)
+
+
+def _ranked_panel(n_names: int = 6, n_weeks: int = 3, industries=None) -> pd.DataFrame:
+    prices = {f"T{i}": 100.0 for i in range(n_names)}
+    scores = {f"T{i}": float(n_names - i) for i in range(n_names)}
+    df = _panel(prices, scores, n=n_weeks)
+    if industries is not None:
+        df["ind"] = df["ticker"].map(industries)
+    return df
+
+
+def test_lump_sum_is_contributed_once_and_buys_fixed_amount_per_week():
+    df = _ranked_panel(n_weeks=3)
+    res = cfs.simulate(df, "score", "px", _lump_cfg())
+    assert res.contributions.sum() == pytest.approx(100_000.0)
+    assert res.contributions.iloc[0] == pytest.approx(100_000.0)
+    buys = [t for t in res.trade_log if t["side"] == "buy"]
+    assert len(buys) == 3                                   # one name per week
+    assert all(b["shares"] * b["px"] <= 10_000.0 for b in buys)
+    assert res.cash.iloc[-1] > 69_000.0                     # the rest stays as cash
+
+
+def test_max_names_cap_blocks_new_names_once_full():
+    df = _ranked_panel(n_weeks=4)
+    res = cfs.simulate(df, "score", "px", _lump_cfg(max_names=2, max_weight=0.10))
+    assert len(res.final_positions) == 2
+
+
+def test_industry_cap_skips_names_from_a_full_industry():
+    inds = {"T0": "semi", "T1": "semi", "T2": "semi", "T3": "fin", "T4": "fin", "T5": "food"}
+    df = _ranked_panel(n_weeks=3, industries=inds)
+    res = cfs.simulate(df, "score", "px", _lump_cfg(industry_cap=0.15, max_weight=0.10), industry_col="ind")
+    bought = [t["ticker"] for t in res.trade_log if t["side"] == "buy"]
+    assert bought == ["T0", "T3", "T5"]                     # second semi would breach 15% of equity
+
+
+def test_odd_lot_slippage_raises_buy_price_and_lowers_sell_price():
+    df = _panel({"A": [100.0, 150.0], "B": 50.0}, {"A": [0.9, 0.1], "B": [0.5, 0.9]}, n=2)
+    res = cfs.simulate(df, "score", "px", _cfg(monthly_cash=1000.0, buy_pct=0.0, sell_pct=0.6, slippage=0.003))
+    buy, sell = [t for t in res.trade_log if t["side"] == "buy"][0], [t for t in res.trade_log if t["side"] == "sell"][0]
+    assert buy["px"] == pytest.approx(100.3)
+    assert sell["px"] == pytest.approx(150.0 * 0.997)
+
+
+def test_lump_benchmark_buys_once_and_holds():
+    px = pd.Series([100.0, 110.0, 121.0], index=pd.date_range("2024-01-05", periods=3, freq="W-FRI"))
+    vals, contribs = cfs.lump_benchmark(px, initial_cash=10_000.0)
+    assert contribs.sum() == pytest.approx(10_000.0)
+    assert vals.iloc[-1] == pytest.approx(vals.iloc[0] - 99 * 100.0 + 99 * 121.0)

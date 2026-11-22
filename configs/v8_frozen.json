@@ -1,0 +1,195 @@
+{
+  "version": "v8.0",
+  "status": "FROZEN",
+  "frozen_on": "2026-11-22",
+  "code_commit": "1778f5fd35ec51434ba26951a566c617c9ba9765",
+  "note": "Pre-registered before any v8 feature was compared with returns. Edit only while status is DRAFT. Once FROZEN, any change is a new version and restarts the paper-trading clock.",
+  "market": "TW",
+  "universe": {
+    "source": "tw_pit_universe",
+    "top_n_by_traded_value": 1000,
+    "lookback_days": 20,
+    "rebalance": "monthly, effective after month end"
+  },
+  "signal_timing": "Friday close; trades at next trading day open",
+  "industry_col": "industry_twse",
+  "dimensions": {
+    "prior": {
+      "pred_baseline_v6_prior": 1
+    },
+    "chip": {
+      "chip_foreign_flow_20d": 1,
+      "chip_trust_flow_20d": 1,
+      "chip_margin_chg_4w": -1,
+      "chip_foreign_hold_chg_12w": 1
+    },
+    "quality": {
+      "pit_ep_z": 1,
+      "pit_roe_z": 1,
+      "q_gm_yoy": 1,
+      "q_roa_yoy": 1,
+      "q_asset_growth": -1,
+      "pit_tw_rev_3m_yoy_z": 1
+    },
+    "macro": {
+      "macro_transmission": 1
+    },
+    "risk": {
+      "risk_idio_vol_60d": -1,
+      "risk_max_21d": -1
+    }
+  },
+  "dimension_weights": {
+    "prior": 0.2,
+    "chip": 0.2,
+    "quality": 0.2,
+    "macro": 0.2,
+    "risk": 0.2
+  },
+  "zscore": {
+    "by": "date",
+    "winsor_pct": 0.01,
+    "winsor": 3.0,
+    "min_names": 30
+  },
+  "trained": {
+    "model": "ridge",
+    "l2_alpha": 500.0,
+    "targets": [
+      "target_rank_4w",
+      "target_rank_12w"
+    ],
+    "features": "sa_<input> for every dimension input (sign-adjusted cross-sectional z, coef >= 0) + extra_features (sign +1: coef >= 0, -1: <= 0, 0: free) + dim_<d> x macro_stress (free)",
+    "extra_features": {
+      "f_mom_qual": 1,
+      "f_res_mom_vol": 1,
+      "f_fip": 1,
+      "f_ind_mom": 1,
+      "f_low_risk": 1,
+      "f_rev_1w": 1,
+      "f_mom_3m": 0,
+      "f_vol_60d": -1,
+      "f_liq": 0,
+      "f_52w_high": 1,
+      "ix_stress_x_lowrisk": 1,
+      "ix_stress_x_mom": -1,
+      "pit_tw_rev_accel_z": 1,
+      "pit_tw_rev_12m_high_z": 1,
+      "risk_amihud_20d": 0
+    },
+    "train_start": "earliest available",
+    "min_train_weeks": 104,
+    "label_embargo_weeks": 13,
+    "refit_every_weeks": 8
+  },
+  "arms": {
+    "P1_v8_blend": {
+      "primary": true,
+      "score": "0.5 * rank(v8_zero) + 0.5 * rank(v8_ridge)"
+    },
+    "P2_v6_prior": {
+      "primary": false,
+      "score": "rank(pred_baseline_v6_prior)"
+    },
+    "P3_v8_zero": {
+      "primary": false,
+      "score": "rank(v8_zero)"
+    }
+  },
+  "score_neutralization": "demean within industry_twse per date (no risk-factor neutralization: risk is an intended dimension)",
+  "portfolios": {
+    "standard": {
+      "engine": "portfolio_sim.simulate_topk_twr (same engine as v7 Stage 3, for comparability)",
+      "top_k": 20,
+      "rebalance_every_weeks": 4,
+      "staggered_cohorts": 4,
+      "buffer_mult": 10.0,
+      "industry_cap": 0.25,
+      "industry_col": "industry_twse",
+      "weighting": "equal",
+      "neutralize_scores_in_engine": false,
+      "note": "buffer_mult 10 keeps a held name while it ranks inside the top 200 (about the top 20%)"
+    },
+    "user_rules": {
+      "capital": "lump sum, no further contributions",
+      "initial_capital_twd": 100000,
+      "monthly_cash_twd": 0,
+      "n_buy_per_week": 1,
+      "buy_amount_twd": 10000,
+      "buy_rule": "each signal week buy the highest-scoring name with rank pct >= buy_pct that is below max_weight, amount = min(buy_amount_twd, cash); odd lots",
+      "buy_pct": 0.98,
+      "sell_pct": 0.6,
+      "sell_rule": "sell a holding when rank pct < sell_pct and it is in profit after costs (zero realized loss); proceeds return to cash",
+      "max_weight": 0.2,
+      "zero_realized_loss": true,
+      "idle_cash_return_annual": 0.0,
+      "hurdle_annual": 0.06,
+      "industry_cap": 0.3,
+      "industry_cap_rule": "skip a candidate if (its industry_twse market value + this buy) / equity > industry_cap",
+      "max_names": null,
+      "odd_lot_slippage": 0.003
+    }
+  },
+  "costs": {
+    "tw_round_trip": 0.00585,
+    "fee_rate": 0.001425,
+    "min_fee_twd": 1.0,
+    "sell_tax": 0.003,
+    "odd_lot_extra_slippage": 0.003
+  },
+  "benchmarks": [
+    "TW PIT universe equal weight",
+    "0050.TW lump-sum buy-and-hold, 100,000 TWD, dividends reinvested, same costs"
+  ],
+  "evaluation": {
+    "start": "first Friday after status becomes FROZEN",
+    "primary_endpoint": "P1 standard portfolio weekly net return minus TW equal weight, 52 weeks: success iff mean > 0 and Newey-West t (4 lags) >= 2.0",
+    "secondary_endpoints": [
+      "P1 weekly cross-sectional rank IC vs next-week open-to-open return, 26 and 52 weeks: mean > 0 and t >= 2.0",
+      "P1 user_rules net NAV return on the 100,000 TWD lump (cash included) vs hurdle 6% and vs 0050 lump-sum buy-and-hold",
+      "P2 and P3 reported with the same metrics (no arm switching)"
+    ],
+    "interim_reports_weeks": [
+      13,
+      26
+    ],
+    "interim_reports_are_descriptive_only": true,
+    "futility_stop": "at 26 weeks, if P1 cumulative net excess vs EW < -10%, stop and recommend passive",
+    "changes_allowed_while_frozen": "data-pipeline bug fixes that do not change any definition above; each logged with date and reason",
+    "adoption_rule": "P1 may be used with real money only if ALL hold at 52 weeks: (1) primary endpoint passes; (2) P1 user_rules net NAV return >= 6% on 100,000 TWD (cash included, after all costs); (3) P1 user_rules net NAV return >= 0050 lump-sum buy-and-hold over the same 52 weeks. Otherwise the model is not adopted.",
+    "historical_oos": {
+      "when": "exactly once, after the FROZEN commit and before paper trading; logged in results/trial_log.csv; nothing may change afterwards",
+      "panel": "snowball_tw_v8 built from the PIT panel (delisted names included, holdings that leave the universe valued at unmasked prices)",
+      "walkforward": "expanding window; each refit uses only labels settled before the refit date (embargo 13 weeks); first refit once 104 signal weeks have settled labels; refit every 8 weeks; each model scores the following 8 weeks",
+      "arms": [
+        "P1_v8_blend",
+        "P2_v6_prior",
+        "P3_v8_zero"
+      ],
+      "comparators": [
+        "TW PIT equal weight (weekly)",
+        "0050.TW lump-sum buy-and-hold and monthly DCA",
+        "v7_final on the PIT panel: cited from T2 (not re-run)"
+      ],
+      "costs": [
+        "round-lot 0.585% round trip",
+        "odd-lot: round-lot costs + 0.3% slippage each side"
+      ],
+      "small_capital_test": "user_rules on 100,000 TWD lump with max_names in {5, 10, none}; descriptive sensitivity, not used to choose",
+      "gate": "P1 standard portfolio, round-lot costs: Excess_t_NW (lags 4) >= 2.0 vs TW EW AND DSR >= 0.95 with N = trial_log rows at run time + 20; also report whether t >= 3.0 (Harvey, Liu & Zhu 2016)",
+      "if_gate_fails": "stop active model development; no paper trading for adoption; engineering moves to passive core ETF tracking and the monthly investor report",
+      "report_metrics": [
+        "IC and IC t_NW",
+        "net CAGR",
+        "net Sharpe",
+        "MDD",
+        "max and current time under water (weeks)",
+        "turnover",
+        "net excess vs EW, Excess_t_NW, net IR, excess MDD",
+        "DSR (conservative N)",
+        "user_rules 100k: final NAV, net return, MDD, fees paid, vs 6% hurdle and vs 0050",
+        "rolling 3-year 6% HWM non-cumulative windows: P(any carry), P(every year >= 6%), mean manager share of profit (overlapping windows, descriptive)"
+      ]
+    }
+  }
+}
