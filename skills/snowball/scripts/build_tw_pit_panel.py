@@ -122,7 +122,11 @@ def fetch_universe_prices(period: str, batch_size: int):
 
 
 def build_panel(period: str, top_n: int, batch_size: int, horizons: Sequence[int] = (4, 12)):
-    """Build the masked PIT panel; returns (panel, mask, mask_summary, unmasked next-open prices)."""
+    """Build the masked PIT panel.
+
+    Returns (panel, mask, mask_summary, unmasked next-open prices, daily TWD price frames) where the
+    daily frames (close adjusted, raw_close, volume in shares) feed the v8 chip / risk features.
+    """
     meta, px, stale = fetch_universe_prices(period, batch_size)
     trading_days = px["close"].index
     weeks = pd.date_range(trading_days.min(), trading_days.max(), freq="W-FRI")
@@ -141,7 +145,8 @@ def build_panel(period: str, top_n: int, batch_size: int, horizons: Sequence[int
         raw_close_d=raw_usd, delisted_stale=stale,
     )
     panel = rerank_targets(psim._apply_membership_mask(frame, mask), horizons)
-    return panel.sort_values(["date", "ticker"]).reset_index(drop=True), mask, summary, next_open_wide(frame)
+    daily = {"close": px["close"], "raw_close": px["raw_close"], "volume": px["volume"]}
+    return panel.sort_values(["date", "ticker"]).reset_index(drop=True), mask, summary, next_open_wide(frame), daily
 
 
 def augment_like_notebook_a(panel: pd.DataFrame, cache_dir: Path) -> pd.DataFrame:
@@ -172,11 +177,15 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=150)
     parser.add_argument("--augment", action="store_true", help="Add PIT valuation, MOPS revenue and 52w high")
     parser.add_argument("--cache-dir", type=Path, default=None)
+    parser.add_argument("--save-daily", action="store_true", help="Also save daily TWD close/raw_close/volume (v8 features)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    panel, mask, summary, wide = build_panel(args.period, args.top_n, args.batch_size)
+    panel, mask, summary, wide, daily = build_panel(args.period, args.top_n, args.batch_size)
+    if args.save_daily:
+        for name, frame in daily.items():
+            frame.to_parquet(args.out_dir / f"tw_pit_daily_{name}.parquet")
     mask.to_parquet(args.out_dir / "tw_pit_membership_mask.parquet")
     wide.to_parquet(args.out_dir / "tw_pit_next_open_usd_wide.parquet")
     summary.to_csv(args.out_dir / "tw_pit_mask_summary.csv")
