@@ -1,8 +1,8 @@
 {
   "version": "v8.0",
-  "status": "DRAFT",
-  "frozen_on": null,
-  "code_commit": null,
+  "status": "FROZEN",
+  "frozen_on": "2026-11-22",
+  "code_commit": "1778f5fd35ec51434ba26951a566c617c9ba9765",
   "note": "Pre-registered before any v8 feature was compared with returns. Edit only while status is DRAFT. Once FROZEN, any change is a new version and restarts the paper-trading clock.",
   "market": "TW",
   "universe": {
